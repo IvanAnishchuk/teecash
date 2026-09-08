@@ -1,0 +1,25 @@
+{
+  "name": "@teecash/lib-blind",
+  "version": "0.1.0",
+  "description": "Blind BLS12-381 signatures over EIP-2537 encodings. No chain dependency.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "vectors": "tsx generate-vectors.ts"
+  },
+  "license": "CC0-1.0 OR Apache-2.0 OR WTFPL",
+  "type": "module",
+  "dependencies": {
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

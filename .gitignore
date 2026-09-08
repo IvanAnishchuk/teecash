@@ -1,0 +1,7 @@
+node_modules/
+.tmp/
+out/
+cache/
+broadcast/
+.env
+*.log
