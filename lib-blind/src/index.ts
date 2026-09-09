@@ -1,4 +1,4 @@
-export { blind, hashToG2, unblind } from "./blind.ts";
+export { blind, hashToG2, randomScalar, unblind } from "./blind.ts";
 export type { Blinded } from "./blind.ts";
 export { LADDER, MIN_DENOM, SLACK, isDenom, pointCount, splitGreedy } from "./denominations.ts";
 export { dst } from "./domain.ts";

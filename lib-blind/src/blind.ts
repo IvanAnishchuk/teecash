@@ -45,7 +45,7 @@ function addressBytes(address: string): Uint8Array {
 }
 
 /** Make a uniform random scalar in the range 1 to order-1. */
-function randomScalar(): bigint {
+export function randomScalar(): bigint {
   for (;;) {
     const buf = crypto.getRandomValues(new Uint8Array(48));
     let v = 0n;

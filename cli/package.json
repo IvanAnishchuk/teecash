@@ -1,0 +1,20 @@
+{
+  "name": "@teecash/cli",
+  "version": "0.1.0",
+  "description": "End to end client for the teecash flow. Deposit, mint, claim, spend.",
+  "scripts": {
+    "teecash": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "CC0-1.0 OR Apache-2.0 OR WTFPL",
+  "type": "module",
+  "dependencies": {
+    "viem": "^2.56.3",
+    "@teecash/lib-blind": "file:../lib-blind"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}

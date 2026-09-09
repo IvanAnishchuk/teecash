@@ -1,0 +1,71 @@
+/**
+ * Chain access and build artifacts.
+ *
+ * The CLI reads the compiled contracts from `contracts/out`. Run `forge build` before
+ * the first deploy.
+ */
+
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import {
+  type Address,
+  type Hex,
+  createPublicClient,
+  createWalletClient,
+  defineChain,
+  http,
+} from "viem";
+import { privateKeyToAccount } from "viem/accounts";
+
+const repoRoot = new URL("../../", import.meta.url);
+
+export const RPC_URL = process.env.TEECASH_RPC ?? "http://127.0.0.1:8545";
+
+/** The first anvil account. It funds the deposits in a local run. */
+export const DEPLOYER_KEY =
+  (process.env.TEECASH_DEPLOYER_KEY as Hex) ??
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+export interface Artifact {
+  abi: unknown[];
+  bytecode: Hex;
+}
+
+/** Read one Foundry artifact. */
+export function artifact(name: string): Artifact {
+  const path = fileURLToPath(new URL(`contracts/out/${name}.sol/${name}.json`, repoRoot));
+  const json = JSON.parse(readFileSync(path, "utf8"));
+  return { abi: json.abi, bytecode: json.bytecode.object as Hex };
+}
+
+/** Build the viem chain from whatever the node reports. */
+export async function connect() {
+  const probe = createPublicClient({ transport: http(RPC_URL) });
+  const chainId = await probe.getChainId();
+  const chain = defineChain({
+    id: chainId,
+    name: `teecash-${chainId}`,
+    nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 6 },
+    rpcUrls: { default: { http: [RPC_URL] } },
+  });
+
+  const account = privateKeyToAccount(DEPLOYER_KEY);
+  return {
+    chainId,
+    chain,
+    account,
+    publicClient: createPublicClient({ chain, transport: http(RPC_URL) }),
+    walletClient: createWalletClient({ account, chain, transport: http(RPC_URL) }),
+  };
+}
+
+export type Chain = Awaited<ReturnType<typeof connect>>;
+
+/** Format a base-unit amount as USDC. */
+export function usdc(amount: bigint): string {
+  const whole = amount / 1_000_000n;
+  const part = (amount % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return part.length > 0 ? `${whole}.${part} USDC` : `${whole} USDC`;
+}
+
+export type { Address, Hex };
