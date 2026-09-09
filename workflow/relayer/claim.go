@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"strings"
@@ -178,11 +179,69 @@ func (r *Relayer) send(ctx context.Context, n note, denom *big.Int) (*result, er
 	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
 		return nil, fmt.Errorf("relayer: the claim reverted in %s", receipt.TxHash)
 	}
+
+	// The contract pays the note exactly its denomination. A note is a normal account, so
+	// it must pay gas from that balance to send the money on. A note with the exact
+	// denomination can therefore never send the denomination. The allowance is the change
+	// that covers one transfer out.
+	//
+	// A failed allowance does not fail the claim. The claim moved the money and it cannot
+	// run again. The note then holds its denomination and no gas, and the relayer can fund
+	// it later.
+	if err := r.fund(ctx, n.wallet, new(big.Int).Add(base, tip), tip); err != nil {
+		log.Printf("the allowance for %s failed: %v", n.wallet, err)
+	}
+
 	return &result{
 		TxHash:  receipt.TxHash.Hex(),
 		GasUsed: receipt.GasUsed,
 		Denom:   denom.String(),
 	}, nil
+}
+
+// The gas a plain value transfer uses.
+const transferGas = 21000
+
+// How many transfers the allowance covers. One is the send out of the note. The rest is a
+// margin for a gas price that rises after the claim.
+const allowanceTransfers = 3
+
+// A transfer that empties a fresh account reverts on Arc. Every account keeps this much.
+const dust = 1
+
+// fund sends the gas allowance to one note.
+func (r *Relayer) fund(ctx context.Context, wallet ethcommon.Address, feeCap, tip *big.Int) error {
+	value := new(big.Int).Mul(feeCap, big.NewInt(transferGas*allowanceTransfers))
+	value.Add(value, big.NewInt(dust))
+
+	nonce, err := r.client.PendingNonceAt(ctx, r.from)
+	if err != nil {
+		return fmt.Errorf("relayer: the nonce did not arrive: %w", err)
+	}
+	tx := ethtypes.NewTx(&ethtypes.DynamicFeeTx{
+		ChainID:   r.chainID,
+		Nonce:     nonce,
+		GasTipCap: tip,
+		GasFeeCap: feeCap,
+		Gas:       transferGas,
+		To:        &wallet,
+		Value:     value,
+	})
+	signed, err := ethtypes.SignTx(tx, ethtypes.LatestSignerForChainID(r.chainID), r.key)
+	if err != nil {
+		return fmt.Errorf("relayer: the signature failed: %w", err)
+	}
+	if err := r.client.SendTransaction(ctx, signed); err != nil {
+		return fmt.Errorf("relayer: the send failed: %w", err)
+	}
+	receipt, err := r.await(ctx, signed.Hash())
+	if err != nil {
+		return err
+	}
+	if receipt.Status != ethtypes.ReceiptStatusSuccessful {
+		return fmt.Errorf("relayer: the allowance reverted in %s", receipt.TxHash)
+	}
+	return nil
 }
 
 // await waits for one receipt.
