@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Address, Hex } from "./chain.ts";
+import type { ProviderName } from "./wallets.ts";
 
 const statePath = fileURLToPath(new URL("../../.tmp/cli-state.json", import.meta.url));
 
@@ -18,7 +19,10 @@ export type NoteStatus = "awaiting-mint" | "ready" | "claimed";
 
 export interface Note {
   address: Address;
-  privateKey: Hex;
+  /** The provider that holds the key. */
+  provider: ProviderName;
+  /** The private key for `local`. The wallet identifier for `privy`. */
+  ref: string;
   /** The blinding factor, 32 bytes of hex. */
   r: Hex;
   blinded: Hex;

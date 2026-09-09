@@ -9,11 +9,15 @@
  *   npm run teecash -- spend [id]
  *   npm run teecash -- status
  *   npm run teecash -- demo 111
+ *   npm run teecash -- privy-check
  *
  * TEECASH_RPC sets the node. TEECASH_DEPLOYER_KEY sets the funding account.
+ *
+ * TEECASH_WALLETS picks the wallet provider. It takes `local` or `privy` and `local` is
+ * the default. The `privy` provider needs PRIVY_APP_ID and PRIVY_APP_SECRET.
  */
 
-import { claim, deploy, deposit, mint, spend, status } from "./commands.ts";
+import { claim, deploy, deposit, mint, privyCheck, spend, status } from "./commands.ts";
 
 const [command, argument] = process.argv.slice(2);
 
@@ -41,6 +45,7 @@ const commands: Record<string, () => Promise<void>> = {
   spend: () => spend(argument),
   status: () => status(),
   demo: () => demo(argument ?? "111"),
+  "privy-check": () => privyCheck(),
 };
 
 const run = commands[command ?? ""];

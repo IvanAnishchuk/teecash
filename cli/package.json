@@ -9,8 +9,9 @@
   "license": "CC0-1.0 OR Apache-2.0 OR WTFPL",
   "type": "module",
   "dependencies": {
-    "viem": "^2.56.3",
-    "@teecash/lib-blind": "file:../lib-blind"
+    "@privy-io/server-auth": "^1.32.5",
+    "@teecash/lib-blind": "file:../lib-blind",
+    "viem": "^2.56.3"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",

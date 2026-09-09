@@ -28,10 +28,12 @@ import {
   getContractAddress,
   http,
   parseAbiParameters,
+  recoverTransactionAddress,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { type Address, type Hex, artifact, connect, usdc } from "./chain.ts";
 import { type Note, type State, findDeposit, load, reset, save, statePath } from "./state.ts";
+import { providerOf, walletProvider } from "./wallets.ts";
 
 const blindMintAbi = artifact("BlindMint").abi;
 const consumerAbi = artifact("MintConsumer").abi;
@@ -101,20 +103,21 @@ export async function deposit(amountUsdc: string): Promise<void> {
   // The mint may pick any split. The deposit therefore carries the smallest split plus
   // slack.
   const count = pointCount(amount);
-  const notes: Note[] = [];
-  for (let i = 0; i < count; i++) {
-    const privateKey = generatePrivateKey();
-    const address = privateKeyToAccount(privateKey).address;
-    const { blinded, r } = blind(address, domain);
-    notes.push({
-      address,
-      privateKey,
+  const provider = walletProvider();
+  const wallets = await provider.create(count);
+
+  const notes: Note[] = wallets.map((wallet, i) => {
+    const { blinded, r } = blind(wallet.address, domain);
+    return {
+      address: wallet.address,
+      provider: wallet.provider,
+      ref: wallet.ref,
       r: toHex(r) as Hex,
       blinded: toHex(blinded) as Hex,
       pointIndex: i,
-      status: "awaiting-mint",
-    });
-  }
+      status: "awaiting-mint" as const,
+    };
+  });
 
   const hash = await walletClient.writeContract({
     address: state.blindMint as Address,
@@ -246,11 +249,9 @@ export async function spend(id?: string): Promise<void> {
   const note = claimed[0];
   if (!note) throw new Error("spend: no wallet holds a note");
 
-  const wallet = createWalletClient({
-    account: privateKeyToAccount(note.privateKey),
-    chain,
-    transport: http(),
-  });
+  // The signer comes from whichever provider made this wallet.
+  const account = await providerOf(note).account(note);
+  const wallet = createWalletClient({ account, chain, transport: http() });
 
   const before = await publicClient.getBalance({ address: note.address });
 
@@ -281,6 +282,50 @@ export async function spend(id?: string): Promise<void> {
   console.log(`${note.address} paid ${usdc(value)} to ${target}`);
   console.log("the wallet paid its own fee and needed no funding transaction");
   console.log(`fee ${usdc(receipt.gasUsed * receipt.effectiveGasPrice)}`);
+}
+
+/**
+ * Check that Privy can serve as the wallet provider.
+ *
+ * The check makes one wallet, signs a transaction for the target chain and recovers the
+ * signer from the signature. It broadcasts nothing.
+ *
+ * The chain identifier defaults to Arc testnet. `signTransaction` carries no CAIP-2
+ * network, so a successful signature shows that Privy does not gate the chain.
+ */
+export async function privyCheck(): Promise<void> {
+  const chainId = Number(process.env.TEECASH_CHECK_CHAIN_ID ?? "5042002");
+  const provider = walletProvider();
+  if (provider.name !== "privy") {
+    console.log("set TEECASH_WALLETS=privy to run this check");
+    return;
+  }
+
+  const [wallet] = await provider.create(1);
+  console.log(`wallet   ${wallet.address}`);
+  console.log(`id       ${wallet.ref}`);
+
+  const account = await provider.account(wallet);
+  const signed = await account.signTransaction({
+    to: wallet.address,
+    value: 1n,
+    nonce: 0,
+    gas: 21_000n,
+    maxFeePerGas: 1_000_000n,
+    maxPriorityFeePerGas: 0n,
+    chainId,
+    type: "eip1559",
+  });
+  const signer = await recoverTransactionAddress({
+    serializedTransaction: signed as `0x02${string}`,
+  });
+
+  console.log(`chain    ${chainId}`);
+  console.log(`signer   ${signer}`);
+  if (signer.toLowerCase() !== wallet.address.toLowerCase()) {
+    throw new Error("privy: the signature does not recover to the wallet address");
+  }
+  console.log(`Privy signed for chain ${chainId} and the signature recovers correctly`);
 }
 
 export async function status(): Promise<void> {
