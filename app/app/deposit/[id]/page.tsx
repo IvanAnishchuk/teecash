@@ -21,7 +21,9 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usdc } from "../../../lib/chain";
+import type { Hex } from "viem";
+import { blindMintAbi } from "../../../lib/abi";
+import { contract, publicClient, usdc } from "../../../lib/chain";
 import { applyAnnouncement, findAnnouncement, relayClaim } from "../../../lib/mint";
 import { claimed, fromAmount, notesOfDeposit, putDepositOnly, putNotes } from "../../../lib/notes";
 import type { Deposit, Note } from "../../../lib/notes";
@@ -87,6 +89,45 @@ export default function WaitScreen() {
       try {
         const stored = await notesOfDeposit(id);
 
+        // The deposit screen stops as soon as the wallet signs, so this screen reads the
+        // receipt itself. The step repeats on every tick until the network answers. A
+        // deposit without a hash never reached a wallet, so it has no receipt to read.
+        if (deposit.onChainId === undefined) {
+          if (deposit.txHash === undefined) {
+            setStep("This deposit never reached your wallet.");
+            return;
+          }
+          setStep("Waiting for the deposit to confirm.");
+          const receipt = await publicClient.getTransactionReceipt({
+            hash: deposit.txHash as Hex,
+          });
+          if (receipt.status !== "success") {
+            setError("The deposit transaction failed. The money did not leave your wallet.");
+            return;
+          }
+
+          // The contract numbers the deposit. Every later log search uses that number, and
+          // the search starts at this block because Arc prunes history.
+          const logs = await publicClient.getContractEvents({
+            address: contract(),
+            abi: blindMintAbi,
+            eventName: "Deposited",
+            blockHash: receipt.blockHash,
+          });
+          const found = (logs[0]?.args as { id?: bigint } | undefined)?.id;
+          if (found === undefined) {
+            setError("deposit: the receipt holds no Deposited event");
+            return;
+          }
+          await putDepositOnly({
+            ...deposit,
+            onChainId: found.toString(),
+            block: receipt.blockNumber.toString(),
+          });
+          await load();
+          return;
+        }
+
         // Notes that already hold a signature are claimed first. A reload in the middle of
         // a claim run leaves them, and they must not wait for another announcement.
         const pending = stored.filter((n) => n.status === "ready" && n.sig !== undefined);
@@ -94,7 +135,7 @@ export default function WaitScreen() {
           await claimAll(pending);
         } else if (stored.some((n) => n.status === "awaiting-mint")) {
           setStep("Waiting for the mint.");
-          const announcement = await findAnnouncement(id, BigInt(deposit.block));
+          const announcement = await findAnnouncement(deposit.onChainId, BigInt(deposit.block));
           if (!announcement) return;
 
           setStep("Checking the signatures.");

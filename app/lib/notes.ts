@@ -62,12 +62,35 @@ export interface Note {
 }
 
 export interface Deposit {
-  /** The transaction hash of the deposit. */
+  /**
+   * The local name of the deposit.
+   *
+   * The client makes this name before it sends the transaction, because the contract gives
+   * a number only after the transaction confirms. The notes carry this name.
+   */
   id: string;
+  /**
+   * The hash of the deposit transaction. Absent until the wallet signs.
+   *
+   * The client writes this hash as soon as the wallet returns it. The hash is the only way
+   * back to a transaction that is already on the chain, so the wait screen can always find
+   * the deposit again. A failed network call therefore delays the client and loses nothing.
+   */
+  txHash?: string;
+  /**
+   * The number the contract gave the deposit. Absent until the client reads the receipt.
+   *
+   * `findAnnouncement` needs this number. The wait screen reads it from the receipt of
+   * `txHash`, and it repeats that step until the read succeeds.
+   */
+  onChainId?: string;
   userId: string;
   /** The amount in native base units, as a decimal string. */
   amount: string;
-  /** The block that holds the deposit. Every log search starts here, because Arc prunes. */
+  /**
+   * The block that holds the deposit. Every log search starts here, because Arc prunes.
+   * The value is "0" until the transaction confirms.
+   */
   block: string;
   status: DepositStatus;
   /** The time of the deposit, in milliseconds. The balance screen shows the age. */

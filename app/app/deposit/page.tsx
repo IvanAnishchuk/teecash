@@ -23,7 +23,7 @@ import { LADDER, pointCount, splitGreedy } from "@teecash/lib-blind";
 import { blindMintAbi } from "../../lib/abi";
 import { CHAIN_ID, chain, contract, publicClient, usdc } from "../../lib/chain";
 import { blindWallets } from "../../lib/mint";
-import { putDeposit, toAmount } from "../../lib/notes";
+import { putDeposit, putDepositOnly, toAmount } from "../../lib/notes";
 import { createNoteWallets } from "../../lib/privy";
 import { useVault } from "../../lib/vault";
 
@@ -62,6 +62,26 @@ export default function DepositScreen() {
       setStep(`Making ${points} wallets.`);
       const made = await createNoteWallets(createWallet, embedded.length, points);
 
+      // The blinding factor of a note exists only here. The contract pays a note against a
+      // signature that the client unblinds with that factor, and nothing on the chain holds
+      // it. A deposit that confirms before the record reaches the disk is therefore lost:
+      // the money is in the contract, `refundByDepositor` refuses after the announcement,
+      // and no claim can succeed. The record goes to the disk before the transaction goes
+      // to the chain.
+      const depositId = crypto.randomUUID();
+      const draft = blindWallets(made, userId, depositId);
+      await putDeposit(
+        {
+          id: depositId,
+          userId,
+          amount: toAmount(amount),
+          block: "0",
+          status: "pending",
+          createdAt: Date.now(),
+        },
+        draft,
+      );
+
       setStep("Asking your wallet to sign the deposit.");
       const provider = await external.getEthereumProvider();
       const walletClient = createWalletClient({
@@ -77,9 +97,6 @@ export default function DepositScreen() {
         await walletClient.switchChain({ id: CHAIN_ID });
       });
 
-      // The blinding happens before the transaction, because the deposit carries the
-      // blinded points as its only argument.
-      const draft = blindWallets(made, userId, "pending");
       const hash = await walletClient.writeContract({
         address: contract(),
         abi: blindMintAbi,
@@ -88,33 +105,22 @@ export default function DepositScreen() {
         value: amount,
       });
 
-      setStep("Waiting for the deposit to confirm.");
-      const receipt = await publicClient.waitForTransactionReceipt({ hash });
-
-      // The contract numbers the deposit. Every later log search uses that number, and
-      // the search starts at this block because Arc prunes history.
-      const logs = await publicClient.getContractEvents({
-        address: contract(),
-        abi: blindMintAbi,
-        eventName: "Deposited",
-        blockHash: receipt.blockHash,
+      // The money is on the chain now. The hash is the only way back to that transaction,
+      // so it reaches the disk before the client waits for anything at all.
+      await putDepositOnly({
+        id: depositId,
+        txHash: hash,
+        userId,
+        amount: toAmount(amount),
+        block: "0",
+        status: "pending",
+        createdAt: Date.now(),
       });
-      const id = (logs[0]?.args as { id?: bigint } | undefined)?.id;
-      if (id === undefined) throw new Error("deposit: the receipt holds no Deposited event");
 
-      const depositId = id.toString();
-      await putDeposit(
-        {
-          id: depositId,
-          userId,
-          amount: toAmount(amount),
-          block: receipt.blockNumber.toString(),
-          status: "pending",
-          createdAt: Date.now(),
-        },
-        draft.map((note) => ({ ...note, depositId })),
-      );
-
+      // The wait screen owns every step after this one. It reads the receipt, it takes the
+      // deposit number from the log, and it claims. That screen repeats each step until it
+      // succeeds, so a network that fails costs time and nothing else. This screen must not
+      // wait here, because a wait that never ends hides a deposit that already exists.
       router.push(`/deposit/${depositId}`);
     } catch (err) {
       setStep(undefined);
