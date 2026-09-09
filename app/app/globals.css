@@ -1,0 +1,91 @@
+:root {
+  color-scheme: light dark;
+  --ink: #101418;
+  --paper: #fbfaf7;
+  --line: #d8d4cb;
+  --dim: #6a6660;
+  --bad: #a3261f;
+  --good: #1f6a3d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e9e6df;
+    --paper: #14161a;
+    --line: #2e3238;
+    --dim: #8d8880;
+    --bad: #e06a60;
+    --good: #6cc08a;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 5rem;
+}
+
+h1 {
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.25rem;
+}
+
+.sub {
+  color: var(--dim);
+  margin: 0 0 2rem;
+}
+
+button {
+  font: inherit;
+  color: var(--paper);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 7px;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.ghost {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--line);
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin: 0 0 1rem;
+}
+
+code,
+.mono {
+  font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+
+.pass {
+  color: var(--good);
+}
+
+.fail {
+  color: var(--bad);
+}

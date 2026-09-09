@@ -1,0 +1,27 @@
+{
+  "name": "@teecash/app",
+  "version": "0.1.0",
+  "description": "Browser wallet for the teecash flow. Sign in, deposit, claim, send.",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "CC0-1.0 OR Apache-2.0 OR WTFPL",
+  "dependencies": {
+    "@privy-io/react-auth": "^3.41.0",
+    "@teecash/lib-blind": "file:../lib-blind",
+    "next": "^16.3.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "viem": "^2.56.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "typescript": "^7.0.2"
+  }
+}

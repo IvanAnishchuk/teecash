@@ -5,3 +5,8 @@ cache/
 broadcast/
 .env
 *.log
+
+# Next.js
+.next/
+.env*.local
+*.tsbuildinfo
