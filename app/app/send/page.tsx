@@ -14,7 +14,7 @@
  * A melt makes ladder notes from it.
  */
 
-import { useCreateWallet, useSignTransaction, useWallets } from "@privy-io/react-auth";
+import { useCreateWallet, usePrivy, useSignTransaction, useWallets } from "@privy-io/react-auth";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { isAddress, parseUnits } from "viem";
@@ -22,7 +22,8 @@ import type { Address } from "viem";
 import { usdc } from "../../lib/chain";
 import { explain } from "../../lib/errors";
 import { putNotes } from "../../lib/notes";
-import { createNoteWallets, legCost, sendFromWallet } from "../../lib/privy";
+import type { Note } from "../../lib/notes";
+import { createNoteWallets, legCost, payFromWallet, sendFromWallet } from "../../lib/privy";
 import { InsufficientFunds, planSweep, valueOf } from "../../lib/spend";
 import type { SweepPlan } from "../../lib/spend";
 import { useVault } from "../../lib/vault";
@@ -30,6 +31,8 @@ import { useVault } from "../../lib/vault";
 export default function SendScreen() {
   const { userId, notes, balance, reload } = useVault();
   const { signTransaction } = useSignTransaction();
+  // `usePrivy` and not `useSendTransaction`. `lib/privy.ts` says why.
+  const { sendTransaction } = usePrivy();
   const { createWallet } = useCreateWallet();
   const { wallets } = useWallets();
   const [to, setTo] = useState("");
@@ -51,11 +54,22 @@ export default function SendScreen() {
     };
   }, []);
 
+  // A person types an amount one character at a time, and the field holds "", "0" and "0."
+  // on the way to "0.02". None of those is a mistake, so none of them makes a message and
+  // none of them reaches `planSweep`. That function throws on an amount of zero, and a
+  // throw on every keystroke fills the console and opens the error overlay of Next.js.
   let plan: SweepPlan | undefined;
   let planError: string | undefined;
-  if (amountText.length > 0) {
+  let amount: bigint | undefined;
+  try {
+    const typed = amountText.trim();
+    if (typed.length > 0) amount = parseUnits(typed, 18);
+  } catch {
+    planError = "That is not an amount.";
+  }
+  if (amount !== undefined && amount > 0n && cost !== undefined) {
     try {
-      if (cost !== undefined) plan = planSweep(notes, parseUnits(amountText, 18), cost);
+      plan = planSweep(notes, amount, cost);
     } catch (err) {
       planError =
         err instanceof InsufficientFunds
@@ -83,26 +97,23 @@ export default function SendScreen() {
       const each = plan.cost / BigInt(plan.notes.length + 1);
       for (const note of plan.notes) {
         setStep(`Collecting ${usdc(valueOf(note))}.`);
-        await sendFromWallet(
-          signTransaction,
-          note.address,
-          pocket.address,
-          valueOf(note) - each,
-          false,
-        );
+        await sendFromWallet(signTransaction, note.address, pocket.address, valueOf(note) - each);
         await putNotes([{ ...note, denom: "0", status: "spent" as const }]);
       }
 
       setStep("Confirm the payment in your wallet.");
-      const paid = await sendFromWallet(
-        signTransaction,
+      const paid = await payFromWallet(
+        sendTransaction,
         pocket.address,
         to as Address,
         plan.amount,
-        true,
+        (amount, recipient) =>
+          `Send ${usdc(amount)} to ${recipient.slice(0, 10)}…${recipient.slice(-6)}.`,
       );
+      setStep("Paying.");
 
-      // The change stays in the new wallet and the balance still counts it.
+      // The change stays in the new wallet and the balance still counts it. The settler
+      // melts it later, so the send ends here and the user waits for nothing.
       if (plan.remainder > 0n) {
         await putNotes([
           {

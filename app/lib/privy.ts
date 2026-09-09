@@ -8,7 +8,7 @@
  * claim.
  */
 
-import type { useCreateWallet, useSignTransaction } from "@privy-io/react-auth";
+import type { useCreateWallet, usePrivy, useSignTransaction } from "@privy-io/react-auth";
 import type { Address, Hex, TransactionSerialized } from "viem";
 import { CHAIN_ID, publicClient } from "./chain";
 import type { Note } from "./notes";
@@ -17,6 +17,7 @@ import type { Note } from "./notes";
 // build error, and the first sign of that would be a failed transaction.
 type CreateWallet = ReturnType<typeof useCreateWallet>["createWallet"];
 type SignTransaction = ReturnType<typeof useSignTransaction>["signTransaction"];
+type SendTransaction = ReturnType<typeof usePrivy>["sendTransaction"];
 
 export interface NewWallet {
   address: Address;
@@ -86,6 +87,90 @@ export async function legCost(): Promise<bigint> {
   return fee + DUST;
 }
 
+/**
+ * Pay the recipient out of the pocket wallet.
+ *
+ * This is the one step that the user approves, so it uses `sendTransaction` and not
+ * `sendFromWallet`. Privy then builds the gas, sends the transaction and shows the screen
+ * that names the amount. That screen names the amount only when the configuration of the
+ * application turns on `transactionScanning`, which `app/providers.tsx` explains.
+ *
+ * Privy chooses the gas. That is safe here and it is not safe for a sweep. A sweep sends
+ * the balance of a note less an exact reserve, so `sendFromWallet` keeps that arithmetic.
+ * This wallet holds more than it pays.
+ *
+ * Call this with the function on `usePrivy`. `useSendTransaction` gives a function of the
+ * same name and the same declared options, and its code holds no reference to `uiOptions`.
+ * That function drops them.
+ */
+export async function payFromWallet(
+  sendTransaction: SendTransaction,
+  from: Address,
+  to: Address,
+  wanted: bigint,
+  /**
+   * The amount as a person reads it.
+   *
+   * The Privy screen names the recipient, the chain and the gas, and the card it draws
+   * reads `balanceOf` on the sending wallet. That card is the balance of the pocket and not
+   * the payment. This sentence carries the amount, because the user approves an amount.
+   */
+  describe: (wanted: bigint, to: Address) => string,
+): Promise<Transfer> {
+  const balance = await publicClient.getBalance({ address: from });
+  const fees = await publicClient.estimateFeesPerGas();
+  const fee = TRANSFER_GAS * fees.maxFeePerGas;
+  if (balance < wanted + fee + DUST) {
+    throw new Error(
+      `spend: the wallet ${from} holds ${balance} and this payment needs ${wanted + fee + DUST}.`,
+    );
+  }
+
+  // The Ethereum path puts the whole options object into the modal as its `uiOptions`, so
+  // every name below sits at the top and not under a `uiOptions` key. `walletUiOptions`
+  // explains the same rule for `showWalletUIs`. The declared type carries the nested shape,
+  // so this passes both and casts once.
+  const options = {
+    address: from,
+    description: describe(wanted, to),
+    buttonText: "Send",
+    transactionInfo: { title: "Payment", action: "Send cash" },
+    successHeader: "Sent.",
+    uiOptions: {
+      description: describe(wanted, to),
+      buttonText: "Send",
+      transactionInfo: { title: "Payment", action: "Send cash" },
+      successHeader: "Sent.",
+    },
+  } as Parameters<SendTransaction>[1];
+
+  const { hash } = await sendTransaction({ to, value: wanted, chainId: CHAIN_ID }, options);
+  await publicClient.waitForTransactionReceipt({ hash });
+  return { sent: wanted, fee, hash };
+}
+
+/**
+ * The options that tell Privy whether to ask the user.
+ *
+ * `sendTransaction` and `signTransaction` give their options to one internal function, and
+ * that function reads `uiOptions.showWalletUIs`. The value therefore belongs under
+ * `uiOptions`. This function also writes it at the top, because a copy costs nothing and
+ * the two shapes are easy to confuse.
+ *
+ * A value that lands in neither place leaves the choice to the configuration of the
+ * application, which asks the user.
+ */
+export function walletUiOptions(
+  address: Address,
+  confirm: boolean,
+): Parameters<SignTransaction>[1] {
+  return {
+    address,
+    showWalletUIs: confirm,
+    uiOptions: { showWalletUIs: confirm },
+  } as Parameters<SignTransaction>[1];
+}
+
 export interface Transfer {
   /** What the recipient receives. It equals `wanted`. */
   sent: bigint;
@@ -100,9 +185,11 @@ export interface Transfer {
  * The wallet pays its own fee, because the wallet is the only account that holds its money.
  * The recipient receives `wanted` and not less.
  *
- * `confirm` decides whether Privy asks the user. A sweep into the new wallet moves money
- * that stays with the user, so it passes false and Privy signs it without a prompt. The
- * payment out passes true, because that is the step the user must approve.
+ * Privy does not ask. A sweep and a melt move money that stays with the user, and those are
+ * the only callers. `payFromWallet` carries the one step that the user approves.
+ *
+ * This function builds the gas and the nonce itself, because a sweep sends the balance of a
+ * note less an exact reserve. A wallet that chose the gas would break that arithmetic.
  *
  * The function sends nothing when the wallet cannot cover `wanted`, the fee and the base
  * unit that Arc keeps. It throws instead.
@@ -112,7 +199,6 @@ export async function sendFromWallet(
   from: Address,
   to: Address,
   wanted: bigint,
-  confirm: boolean,
 ): Promise<Transfer> {
   const balance = await publicClient.getBalance({ address: from });
   const fees = await publicClient.estimateFeesPerGas();
@@ -139,7 +225,7 @@ export async function sendFromWallet(
       maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
       chainId: CHAIN_ID,
     },
-    { address: from, uiOptions: { showWalletUIs: confirm } },
+    walletUiOptions(from, false),
   );
 
   const hash = await publicClient.sendRawTransaction({
