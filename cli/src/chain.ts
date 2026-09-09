@@ -5,7 +5,7 @@
  * the first deploy.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   type Address,
@@ -18,6 +18,24 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 
 const repoRoot = new URL("../../", import.meta.url);
+
+/**
+ * Load the local environment files.
+ *
+ * `cli/.env` holds the node, the deployer key and the Privy credentials. `workflow/.env`
+ * holds the mint keys that the CRE workflow reads. The deployment must use the same mint
+ * keys as the workflow. The CLI therefore reads that file too.
+ *
+ * A variable already in the environment wins over both files.
+ */
+function loadEnvFiles(): void {
+  for (const relative of ["cli/.env", "workflow/.env"]) {
+    const path = fileURLToPath(new URL(relative, repoRoot));
+    if (existsSync(path)) process.loadEnvFile(path);
+  }
+}
+
+loadEnvFiles();
 
 export const RPC_URL = process.env.TEECASH_RPC ?? "http://127.0.0.1:8545";
 

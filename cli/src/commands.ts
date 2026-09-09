@@ -56,8 +56,15 @@ export async function deploy(): Promise<void> {
   state.chainId = chainId;
 
   // One secret for each denomination of the ladder.
+  //
+  // The CRE workflow reads the same keys from `workflow/.env`. Both sides must hold the
+  // same keys. A signature from the simulation is otherwise invalid for this
+  // deployment. An environment variable therefore wins over a fresh random scalar.
   for (const denom of LADDER) {
-    state.mintKeys[denom.toString()] = `0x${randomScalar().toString(16).padStart(64, "0")}`;
+    const fromEnv = process.env[`SECRET_MINT_KEY_${denom / 1_000_000n}_USDC`];
+    state.mintKeys[denom.toString()] = fromEnv
+      ? (`0x${fromEnv.replace(/^0x/, "")}` as Hex)
+      : `0x${randomScalar().toString(16).padStart(64, "0")}`;
   }
   const keys = keysOf(state);
 
@@ -73,11 +80,15 @@ export async function deploy(): Promise<void> {
   const mintReceipt = await publicClient.waitForTransactionReceipt({ hash: mintHash });
   state.blindMint = mintReceipt.contractAddress as Address;
 
-  // The deployer replaces the CRE forwarder in a local run.
+  // Only the CRE forwarder can deliver a report to the consumer. A CRE simulation
+  // writes through the mock forwarder of the chain. TEECASH_CRE_FORWARDER carries that
+  // address. The deployer takes the role when the variable is absent. The `mint`
+  // command needs that default.
+  const creForwarder = (process.env.TEECASH_CRE_FORWARDER ?? account.address) as Address;
   const consumerHash = await walletClient.deployContract({
     abi: consumerAbi,
     bytecode: artifact("MintConsumer").bytecode,
-    args: [account.address, state.blindMint],
+    args: [creForwarder, state.blindMint],
   });
   const consumerReceipt = await publicClient.waitForTransactionReceipt({ hash: consumerHash });
   state.consumer = consumerReceipt.contractAddress as Address;
@@ -90,6 +101,7 @@ export async function deploy(): Promise<void> {
   console.log(`chain      ${chainId}`);
   console.log(`BlindMint  ${state.blindMint}`);
   console.log(`consumer   ${state.consumer}`);
+  console.log(`forwarder  ${creForwarder}`);
   console.log(`ladder     ${LADDER.map((d) => usdc(d)).join(", ")}`);
   console.log(`state      ${statePath}`);
 }
@@ -141,6 +153,7 @@ export async function deposit(amountUsdc: string): Promise<void> {
 
   console.log(`deposit ${id} of ${usdc(amount)} against ${count} points`);
   console.log(`the smallest split needs ${splitGreedy(amount).length} notes`);
+  console.log(`tx ${hash}`);
   console.log(`gas ${receipt.gasUsed}`);
 }
 
