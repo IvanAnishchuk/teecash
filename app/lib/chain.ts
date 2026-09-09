@@ -44,7 +44,9 @@ export const RELAYER_URL =
  */
 export const chain: Chain = defineChain({
   id: CHAIN_ID,
-  name: `teecash-${CHAIN_ID}`,
+  // The wallet shows this name when it asks the user to approve. It must name the chain
+  // that the user knows, and not this application.
+  name: process.env.NEXT_PUBLIC_TEECASH_CHAIN_NAME ?? "Arc Testnet",
   nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
   rpcUrls: { default: { http: [RPC_URL] } },
 });
