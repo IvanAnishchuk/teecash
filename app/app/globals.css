@@ -116,7 +116,8 @@ label > span {
   margin: 0 0 0.3rem;
 }
 
-input {
+input,
+select {
   font: inherit;
   width: 100%;
   color: var(--ink);
@@ -124,6 +125,12 @@ input {
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 0.5rem 0.7rem;
+}
+
+/* A select takes its list from the browser, which paints it on the page background. */
+select option {
+  color: var(--ink);
+  background: var(--paper);
 }
 
 a {
