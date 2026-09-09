@@ -3,8 +3,8 @@
   "blindMint": "0x0000000000000000000000000000000000000000",
   "consumer": "0x0000000000000000000000000000000000000000",
   "ladder": [
-    { "denom": "1000000", "secretId": "MINT_KEY_1_USDC" },
-    { "denom": "10000000", "secretId": "MINT_KEY_10_USDC" },
-    { "denom": "100000000", "secretId": "MINT_KEY_100_USDC" }
+    { "denom": "1000000000000000000", "secretId": "MINT_KEY_1_USDC" },
+    { "denom": "10000000000000000000", "secretId": "MINT_KEY_10_USDC" },
+    { "denom": "100000000000000000000", "secretId": "MINT_KEY_100_USDC" }
   ]
 }
