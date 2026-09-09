@@ -69,10 +69,17 @@ assumptions beyond those of the underlying chain.
 
 Arc testnet, chain ID 5042002.
 
+`BlindMint` is the only contract. It deploys through the canonical CREATE2 deployer at
+`0x4e59b44847b379578588920cA78FbF26c0B4956C` under a fixed salt, so its address depends on
+the forwarder, the ladder and the mint public keys alone. The same inputs give the same
+address on every chain and on every run, and no configuration file has to follow it.
+
+The address below is from the earlier two-contract deployment. A redeployment of the
+merged contract is pending.
+
 | Contract | Address |
 |---|---|
-| `BlindMint` | `0xfa862110c5b64395c3dffea7c8b7e9b3b08971f4` |
-| `MintConsumer` | `0x1e65a452d0a31ba125af2bf1e8e617053b336946` |
+| `BlindMint` (stale) | `0xfa862110c5b64395c3dffea7c8b7e9b3b08971f4` |
 
 Measured cost on Arc:
 
@@ -136,7 +143,8 @@ The mint picks any assignment whose denominations sum to the deposit.
 ```
 lib-blind/   TypeScript. blind, unblind, verify, the EIP-2537 codec, the ladder.
              No chain dependency. vectors.json is generated here.
-contracts/   Foundry. BlindMint.sol, BLS.sol, MintConsumer.sol.
+contracts/   Foundry. BlindMint.sol and BLS.sol. BlindMint receives the CRE report
+             itself, so it answers ERC-165 and holds `onReport`.
 workflow/    Go. The CRE project. mint/ and announce/ hold the logic and test on the
              host. blindmint/ holds the workflow itself.
 cli/         The client. deploy, deposit, mint, sync, claim, spend, sweep.
@@ -174,14 +182,16 @@ export TEECASH_CRE_FORWARDER=0x6E9EE680ef59ef64Aa8C7371279c27E496b5eDc1
 
 cd cli
 npm run teecash -- deploy
-npm run teecash -- deposit 3           # prints the transaction hash
-
-# put the two addresses into workflow/blindmint/config.production.json, then:
+# Put the address that `deploy` printed into workflow/blindmint/config.production.json.
+# The address is stable, so this is a one-time step.
+#
+# Then run the mint as a service. It fires on every deposit and it re-arms:
 cd ../workflow
 cre workflow simulate ./blindmint --target production-settings -e .env \
-  --trigger-index 0 --evm-tx-hash <hash> --evm-event-index 1 --broadcast
+  --trigger-index 0 --listen --broadcast
 
 cd ../cli
+npm run teecash -- deposit 3
 npm run teecash -- sync
 npm run teecash -- claim
 npm run teecash -- spend

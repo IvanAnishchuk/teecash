@@ -83,7 +83,10 @@ does not show up anywhere else.
 - Triggers, chain reads and chain writes never run inside the enclave.
 - **A receiver must answer `supportsInterface`.** The forwarder checks ERC-165 before it
   delivers. A receiver that fails the check gets no report, and the forwarder's own
-  transaction still succeeds.
+  transaction still succeeds. `BlindMint` is the receiver and answers the check itself.
+- **`cre workflow simulate --listen` runs the mint as a service.** It fires on every
+  matching log and it re-arms. A one-shot run needs `--evm-tx-hash` and
+  `--evm-event-index` instead.
 - `cre` needs a login. Staging targets a local anvil. Production targets Arc.
 - Secrets reach the enclave through environment variables that `secrets.yaml` maps.
 
