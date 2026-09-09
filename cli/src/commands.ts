@@ -304,10 +304,13 @@ export async function claim(id?: string): Promise<void> {
  * own transaction and it needs no extra funding.
  */
 export async function spend(id?: string): Promise<void> {
-  const { chain, publicClient } = await connect();
+  const { account, chain, publicClient } = await connect();
   const state = load();
   const record = findDeposit(state, id);
-  const target = privateKeyToAccount(generatePrivateKey()).address;
+
+  // The payment goes to the deployer. Testnet funds are limited, and the point of this
+  // step is the sender, not the recipient.
+  const target = (process.env.TEECASH_SPEND_TO ?? account.address) as Address;
 
   // Spend the largest note. It covers its own fee most easily.
   const claimed = record.notes.filter((n) => n.status === "claimed" && n.denom !== undefined);
@@ -392,6 +395,49 @@ export async function privyCheck(): Promise<void> {
     throw new Error("privy: the signature does not recover to the wallet address");
   }
   console.log(`Privy signed for chain ${chainId} and the signature recovers correctly`);
+}
+
+/**
+ * Return the value of every claimed note to the deployer.
+ *
+ * Testnet funds are limited. A sweep makes a second run cheap.
+ *
+ * Each wallet keeps one base unit. Arc reverts a transfer that leaves an account with a
+ * zero balance, a zero nonce and no code.
+ */
+export async function sweep(id?: string): Promise<void> {
+  const { account, chain, publicClient } = await connect();
+  const state = load();
+  const record = findDeposit(state, id);
+
+  const block = await publicClient.getBlock();
+  const priority = BigInt(process.env.TEECASH_PRIORITY_FEE ?? "0");
+  const maxFee = (block.baseFeePerGas ?? 0n) + priority;
+  const fee = maxFee * 21_000n;
+
+  let total = 0n;
+  for (const note of record.notes) {
+    const balance = await publicClient.getBalance({ address: note.address });
+    const value = balance - fee - 1n;
+    if (value <= 0n) continue;
+
+    const wallet = createWalletClient({
+      account: await providerOf(note).account(note),
+      chain,
+      transport: http(),
+    });
+    const hash = await wallet.sendTransaction({
+      to: account.address,
+      value,
+      gas: 21_000n,
+      maxFeePerGas: maxFee,
+      maxPriorityFeePerGas: priority,
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+    total += value;
+    console.log(`${note.address} returned ${usdc(value)}`);
+  }
+  console.log(`${usdc(total)} returned to ${account.address}`);
 }
 
 export async function status(): Promise<void> {

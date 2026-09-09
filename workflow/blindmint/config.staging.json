@@ -1,10 +1,10 @@
 {
   "chainSelector": 3034092155422581607,
-  "blindMint": "0xdc64a140aa3e981100a9beca4e685f962f0cf6c9",
-  "consumer": "0x5fc8d32690cc91d4c39d9d3abcbd16989f875707",
+  "blindMint": "0xfa862110c5b64395c3dffea7c8b7e9b3b08971f4",
+  "consumer": "0x1e65a452d0a31ba125af2bf1e8e617053b336946",
   "ladder": [
-    { "denom": "1000000", "secretId": "MINT_KEY_1_USDC" },
-    { "denom": "10000000", "secretId": "MINT_KEY_10_USDC" },
-    { "denom": "100000000", "secretId": "MINT_KEY_100_USDC" }
+    { "denom": "1000000000000000000", "secretId": "MINT_KEY_1_USDC" },
+    { "denom": "10000000000000000000", "secretId": "MINT_KEY_10_USDC" },
+    { "denom": "100000000000000000000", "secretId": "MINT_KEY_100_USDC" }
   ]
 }
