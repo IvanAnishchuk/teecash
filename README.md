@@ -74,18 +74,17 @@ Arc testnet, chain ID 5042002.
 the forwarder, the ladder and the mint public keys alone. The same inputs give the same
 address on every chain and on every run, and no configuration file has to follow it.
 
-The address below is from the earlier two-contract deployment. A redeployment of the
-merged contract is pending.
+The same inputs give this address on a local anvil too.
 
 | Contract | Address |
 |---|---|
-| `BlindMint` (stale) | `0xfa862110c5b64395c3dffea7c8b7e9b3b08971f4` |
+| `BlindMint` | `0x04fBCd15D1bAf43AC48706ee1b43d4F98420A79a` |
 
 Measured cost on Arc:
 
 | Step | Gas | Cost |
 |---|---|---|
-| Deploy both contracts | — | 0.0565 USDC |
+| Deploy | — | 0.0532 USDC |
 | `deposit` | 123,026 | 0.0026 USDC |
 | `claim` | 371,486 | 0.0078 USDC |
 | `spend` | 21,000 | 0.00042 USDC |
