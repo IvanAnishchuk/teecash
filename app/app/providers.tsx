@@ -12,8 +12,10 @@
  */
 
 import { PrivyProvider } from "@privy-io/react-auth";
+import type { PrivyClientConfig } from "@privy-io/react-auth";
 import type { ReactNode } from "react";
 import { chain } from "../lib/chain";
+import { useSettler } from "../lib/settler";
 
 const APP_ID = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
 
@@ -31,27 +33,51 @@ export function Providers({ children }: { children: ReactNode }) {
     <PrivyProvider
       appId={APP_ID}
       config={{
+        /**
+         * `showWalletUIs` stays unset, which leaves the default.
+         *
+         * Each call decides instead. A sweep and a melt pass false, because they move money
+         * that stays with the user. The payment out passes true, because that is the step
+         * that leaves the user and the step the user must approve.
+         *
+         * A value here would decide for every call, and the payment out would then sign
+         * with no question at all.
+         */
         embeddedWallets: {
           ethereum: { createOnLogin: "off" },
           /**
-           * Privy signs with a note wallet and it does not ask.
+           * The Privy screen shows the amount only when it simulates the transaction.
            *
-           * A send empties many notes into one wallet, and a prompt for each note makes a
-           * send of ten notes unusable. Every one of those transactions moves money that
-           * stays with the user. The payment out is the step that leaves the user, and
-           * `sendFromWallet` asks Privy to prompt for that one.
+           * `SendTransactionScreen` fills `tokensSent` from the simulation. It has a second
+           * path that reads the value of the transaction, and that path runs only after a
+           * scan fails. A scan that never starts therefore leaves the amount empty, and the
+           * user approves a payment with no number on the screen.
            *
-           * The screen of this application therefore carries the confirmation. It shows
-           * the amount, the gas and the notes it uses, which is more than the Privy modal
-           * shows for the same transaction.
+           * The default of `enabled` is false. The declared type of the configuration omits
+           * this field, so it needs a cast.
            */
-          showWalletUIs: false,
+          transactionScanning: { enabled: true },
         },
         defaultChain: chain,
         supportedChains: [chain],
-      }}
+      } as PrivyClientConfig}
     >
+      <Settler />
       {children}
     </PrivyProvider>
   );
+}
+
+/**
+ * The settler runs for as long as the application is open.
+ *
+ * It sits here and not on a screen. A deposit needs this browser to claim its notes, and it
+ * must not also need one screen. A user who opens the balance settles a deposit that a
+ * different screen started.
+ *
+ * The component draws nothing.
+ */
+function Settler(): null {
+  useSettler();
+  return null;
 }

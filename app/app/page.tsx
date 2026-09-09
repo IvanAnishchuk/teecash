@@ -65,23 +65,18 @@ export default function Balance() {
       </div>
 
       {unfinished.length > 0 && (
-        <div className="card">
-          <strong>Waiting</strong>
-          {unfinished.map((deposit) => (
-            <div key={deposit.id} className="line">
-              <span>{usdc(fromAmount(deposit.amount))}</span>
-              <span className="dim">{deposit.status}</span>
-              <Link href={`/deposit/${deposit.id}`}>open</Link>
-            </div>
-          ))}
-        </div>
+        <p className="sub">
+          {usdc(unfinished.reduce((total, d) => total + fromAmount(d.amount), 0n))} is on the way.
+          This finishes by itself.
+        </p>
       )}
 
       {balance === 0n && unfinished.length === 0 && !loading && (
         <p className="sub">There is no money here yet. Add some.</p>
       )}
 
-      {groups.length > 0 && (
+
+      {(groups.length > 0 || unfinished.length > 0) && (
         <details>
           <summary className="sub">Notes</summary>
           <div className="card">
@@ -89,6 +84,13 @@ export default function Balance() {
               <div key={group.denom.toString()} className="line">
                 <span>{usdc(group.denom)}</span>
                 <span className="dim">{group.count}</span>
+              </div>
+            ))}
+            {unfinished.map((deposit) => (
+              <div key={deposit.id} className="line">
+                <span>{usdc(fromAmount(deposit.amount))}</span>
+                <span className="dim">{deposit.status}</span>
+                <Link href={`/deposit/${deposit.id}`}>details</Link>
               </div>
             ))}
           </div>
