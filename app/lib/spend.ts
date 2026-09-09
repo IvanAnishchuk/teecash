@@ -21,9 +21,16 @@ import type { Note } from "./notes";
 /** One note and the amount to move out of it. */
 export interface Leg {
   note: Note;
-  /** The amount to send. It equals the whole note except on the last leg. */
+  /** What the recipient receives from this note. */
   amount: bigint;
-  /** What stays in the note after this leg. Zero on every leg except the last. */
+  /**
+   * What this leg costs the note. It is the gas fee plus the base unit that Arc keeps.
+   *
+   * The note pays it, because a note is the only account that holds its own money. The
+   * cost is the same on every leg, so a send of many legs pays it many times.
+   */
+  cost: bigint;
+  /** The spendable value left in the note. Zero on every leg except the last. */
   remainder: bigint;
 }
 
@@ -31,6 +38,8 @@ export interface Selection {
   legs: Leg[];
   /** The sum of every leg. It equals the requested amount. */
   total: bigint;
+  /** What every leg costs together. The notes pay it and the recipient does not see it. */
+  cost: bigint;
 }
 
 export class InsufficientFunds extends Error {
@@ -47,9 +56,14 @@ export function valueOf(note: Note): bigint {
   return note.denom ? fromAmount(note.denom) : 0n;
 }
 
-/** The notes a send may use. A note must be claimed and it must hold value. */
-export function spendable(notes: Note[]): Note[] {
-  return notes.filter((n) => n.status === "claimed" && valueOf(n) > 0n);
+/**
+ * The notes a send may use.
+ *
+ * A note must be claimed. It must also hold more than the cost of one leg. A note that
+ * holds less cannot pay the fee to move itself, so it can deliver nothing.
+ */
+export function spendable(notes: Note[], cost = 0n): Note[] {
+  return notes.filter((n) => n.status === "claimed" && valueOf(n) > cost);
 }
 
 /** Sort the values from large to small. A bigint has no default sort. */
@@ -89,10 +103,20 @@ function exactSubset(notes: Note[], amount: bigint): Note[] | undefined {
 /**
  * Choose the notes for one send.
  *
- * `notes` is every note of the user. `amount` is the requested amount in native base units.
+ * `notes` is every note of the user. `amount` is what the recipient must receive, in native
+ * base units. `cost` is what one leg costs the note that sends it, which is the gas fee plus
+ * the base unit that Arc keeps in the account.
+ *
+ * The notes pay the cost, so the wallet loses `amount` plus one cost for each leg. The
+ * recipient receives `amount` exactly.
  *
  * The function looks for an exact set of whole notes first. Such a send leaves every note
- * on the ladder, so it takes nothing away from the anonymity set of the notes that stay.
+ * on the ladder, so it keeps the anonymity set of the notes that stay.
+ *
+ * A cost above zero makes an exact set unlikely. A note that pays a fee delivers its value
+ * minus the fee, and that result is not a ladder value. Almost every send on a chain with a
+ * gas price therefore breaks one note. This is a cost of the exact amount, and
+ * `docs/frontend-spec.md` records it.
  *
  * When no exact set exists, one note must break. The function builds two plans and keeps
  * the plan that strands the smaller amount in the broken note. `emptyThenBreak` and
@@ -101,32 +125,56 @@ function exactSubset(notes: Note[], amount: bigint): Note[] | undefined {
  *
  * The broken note is the last leg, as `docs/frontend-spec.md` describes.
  */
-export function selectNotes(notes: Note[], amount: bigint): Selection {
+export function selectNotes(notes: Note[], amount: bigint, cost = 0n): Selection {
   if (amount <= 0n) throw new Error("spend: the amount must be more than zero");
+  if (cost < 0n) throw new Error("spend: the cost must not be less than zero");
 
-  const usable = spendable(notes);
-  const available = usable.reduce((total, note) => total + valueOf(note), 0n);
-  if (available < amount) throw new InsufficientFunds(available, amount);
+  const usable = spendable(notes, cost);
 
-  const exact = exactSubset(usable, amount);
-  if (exact) {
+  // The wallet must pay one cost for each leg. The total decides the plan and the plan
+  // decides the number of legs, so the two depend on each other. Try each leg count and
+  // keep the first count that its own plan agrees with. A low count comes first, so the
+  // send uses the fewest notes it can.
+  for (let legs = 1; legs <= usable.length; legs++) {
+    const gross = plan(usable, amount + BigInt(legs) * cost);
+    if (!gross || gross.length !== legs) continue;
     return {
-      legs: exact.map((note) => ({ note, amount: valueOf(note), remainder: 0n })),
+      legs: gross.map((leg) => ({ ...leg, amount: leg.amount - cost, cost })),
       total: amount,
+      cost: BigInt(legs) * cost,
     };
   }
 
+  // Report what the notes can deliver and not what they hold. The difference is the fee of
+  // every note, and a wallet that holds the amount can still fail to send it.
+  const held = usable.reduce((total, note) => total + valueOf(note), 0n);
+  const deliverable = held - BigInt(usable.length) * cost;
+  throw new InsufficientFunds(deliverable > 0n ? deliverable : 0n, amount);
+}
+
+/**
+ * Build the legs that take `target` out of the notes. `target` is the gross amount, so it
+ * covers the fee of every leg.
+ *
+ * The return is undefined when the notes cannot reach the target.
+ */
+function plan(usable: Note[], target: bigint): Leg[] | undefined {
+  const available = usable.reduce((total, note) => total + valueOf(note), 0n);
+  if (available < target) return undefined;
+
+  const exact = exactSubset(usable, target);
+  if (exact) {
+    return exact.map((note) => ({ note, amount: valueOf(note), cost: 0n, remainder: 0n }));
+  }
+
   // One note must break. Two plans are worth comparing, and the cheaper one wins.
-  const plans = [emptyThenBreak(usable, amount), breakOneNote(usable, amount)];
-  const best = plans
-    .filter((plan): plan is Leg[] => plan !== undefined)
+  const plans = [emptyThenBreak(usable, target), breakOneNote(usable, target)];
+  return plans
+    .filter((built): built is Leg[] => built !== undefined)
     .sort((a, b) => {
       const residue = descending(strandedOf(b), strandedOf(a)); // Smaller residue first.
       return residue !== 0 ? residue : a.length - b.length;
     })[0];
-
-  if (!best) throw new InsufficientFunds(available, amount);
-  return { legs: best, total: amount };
 }
 
 /** The value left in the broken note. It is the amount that stops matching the ladder. */
@@ -149,7 +197,7 @@ function emptyThenBreak(notes: Note[], amount: bigint): Leg[] | undefined {
   for (const note of [...notes].sort((a, b) => descending(valueOf(a), valueOf(b)))) {
     const value = valueOf(note);
     if (value <= owed) {
-      legs.push({ note, amount: value, remainder: 0n });
+      legs.push({ note, amount: value, cost: 0n, remainder: 0n });
       owed -= value;
     } else {
       untouched.push(note);
@@ -160,7 +208,7 @@ function emptyThenBreak(notes: Note[], amount: bigint): Leg[] | undefined {
   // `untouched` runs from large to small, and every note in it is larger than `owed`.
   const cover = untouched.at(-1);
   if (!cover) return undefined;
-  legs.push({ note: cover, amount: owed, remainder: valueOf(cover) - owed });
+  legs.push({ note: cover, amount: owed, cost: 0n, remainder: valueOf(cover) - owed });
   return legs;
 }
 
@@ -176,5 +224,5 @@ function breakOneNote(notes: Note[], amount: bigint): Leg[] | undefined {
     .filter((note) => valueOf(note) >= amount)
     .sort((a, b) => descending(valueOf(b), valueOf(a)))[0];
   if (!cover) return undefined;
-  return [{ note: cover, amount, remainder: valueOf(cover) - amount }];
+  return [{ note: cover, amount, cost: 0n, remainder: valueOf(cover) - amount }];
 }

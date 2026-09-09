@@ -61,8 +61,33 @@ export async function createNoteWallets(
  */
 export const DUST = 1n;
 
+/** The gas a plain value transfer uses. */
+const TRANSFER_GAS = 21000n;
+
+/**
+ * The margin on the fee estimate.
+ *
+ * The client plans a send before it signs. The gas price can increase between the two
+ * steps, and a plan that reserves the exact fee then fails. The margin adds one half to the
+ * estimate. The note keeps the part of the margin that the transaction does not use.
+ */
+const MARGIN_NUMERATOR = 3n;
+const MARGIN_DENOMINATOR = 2n;
+
+/**
+ * What one leg costs the note that sends it.
+ *
+ * This is the gas fee plus the base unit that Arc keeps. `selectNotes` needs it to plan a
+ * send that delivers an exact amount.
+ */
+export async function legCost(): Promise<bigint> {
+  const fees = await publicClient.estimateFeesPerGas();
+  const fee = (TRANSFER_GAS * fees.maxFeePerGas * MARGIN_NUMERATOR) / MARGIN_DENOMINATOR;
+  return fee + DUST;
+}
+
 export interface Transfer {
-  /** What the recipient receives. */
+  /** What the recipient receives. It equals `wanted`. */
   sent: bigint;
   /** What the note pays the chain. */
   fee: bigint;
@@ -73,12 +98,11 @@ export interface Transfer {
  * Move money from one note.
  *
  * The note pays its own fee, because the note is the only account that holds its money.
- * The fee therefore reduces `wanted`. A caller that needs an exact amount at the recipient
- * must add the fee to `wanted` itself.
+ * The recipient receives `wanted` and not less.
  *
- * The function sends less than `wanted` when the note cannot cover both `wanted` and the
- * fee. It never sends the whole balance, because Arc reverts a transfer that empties a
- * fresh account.
+ * The function sends nothing when the note cannot cover `wanted`, the fee and the base unit
+ * that Arc keeps. It throws instead. An earlier version sent the largest amount it could,
+ * and a send of several legs then delivered less than the screen showed.
  */
 export async function sendFromNote(
   signTransaction: SignTransaction,
@@ -89,12 +113,17 @@ export async function sendFromNote(
   const from = note.address;
   const balance = await publicClient.getBalance({ address: from });
   const fees = await publicClient.estimateFeesPerGas();
-  const gas = 21000n;
+  const gas = TRANSFER_GAS;
   const fee = gas * fees.maxFeePerGas;
 
-  const spendable = balance > fee + DUST ? balance - fee - DUST : 0n;
-  if (spendable === 0n) throw new Error(`spend: the note ${from} cannot cover its own fee`);
-  const sent = wanted < spendable ? wanted : spendable;
+  const needed = wanted + fee + DUST;
+  if (balance < needed) {
+    throw new Error(
+      `spend: the note ${from} holds ${balance} and this leg needs ${needed}. ` +
+        "The gas price increased after the plan. Try the send again.",
+    );
+  }
+  const sent = wanted;
 
   const nonce = await publicClient.getTransactionCount({ address: from });
   const { signature } = await signTransaction(

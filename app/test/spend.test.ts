@@ -131,3 +131,59 @@ describe("selectNotes", () => {
     expect(picked.legs[0].remainder).toBe(0n);
   });
 });
+
+/**
+ * A note pays its own fee, because a note is the only account that holds its money. The
+ * amount is what the recipient receives, so the notes must cover the amount and every fee.
+ */
+describe("selectNotes with a leg cost", () => {
+  /** One leg costs this much. It is the gas fee plus the base unit that Arc leaves behind. */
+  const COST = USDC / 100n;
+
+  it("delivers the exact amount to the recipient", () => {
+    const wallet = [note(100n), note(10n), note(10n), note(1n), note(1n), note(1n)];
+    const picked = selectNotes(wallet, 12n * USDC, COST);
+    expect(sum(picked.legs)).toBe(12n * USDC);
+    expect(picked.total).toBe(12n * USDC);
+  });
+
+  it("takes the amount and the cost out of every note it uses", () => {
+    const wallet = [note(100n), note(10n), note(10n), note(1n), note(1n), note(1n)];
+    const picked = selectNotes(wallet, 12n * USDC, COST);
+    for (const leg of picked.legs) {
+      expect(leg.cost).toBe(COST);
+      // Nothing appears and nothing disappears. The note pays for all three.
+      expect(valueOf(leg.note)).toBe(leg.amount + leg.cost + leg.remainder);
+    }
+  });
+
+  it("refuses when the notes cover the amount but not the fees", () => {
+    const wallet = [note(1n), note(1n)];
+    expect(() => selectNotes(wallet, 2n * USDC, COST)).toThrow(InsufficientFunds);
+  });
+
+  it("ignores a note that cannot pay its own fee", () => {
+    const dust = { ...note(1n), denom: (COST / 2n).toString() };
+    const wallet = [note(1n), dust];
+    const picked = selectNotes(wallet, USDC / 2n, COST);
+    expect(picked.legs.map((leg) => leg.note.address)).not.toContain(dust.address);
+  });
+
+  it("charges the cost once for each leg and not once for the send", () => {
+    // 12 from {10, 1, 1} needs three legs, so the wallet must cover three costs.
+    const wallet = [note(10n), note(1n), note(1n)];
+    expect(() => selectNotes(wallet, 12n * USDC, COST)).toThrow(InsufficientFunds);
+
+    const richer = [note(10n), note(1n), note(1n), note(1n)];
+    const picked = selectNotes(richer, 12n * USDC, COST);
+    expect(sum(picked.legs)).toBe(12n * USDC);
+    expect(picked.legs.length).toBeGreaterThan(1);
+  });
+
+  it("costs nothing when the cost is zero", () => {
+    const wallet = [note(10n), note(1n)];
+    const picked = selectNotes(wallet, 11n * USDC, 0n);
+    expect(sum(picked.legs)).toBe(11n * USDC);
+    expect(picked.legs.every((leg) => leg.cost === 0n)).toBe(true);
+  });
+});

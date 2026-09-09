@@ -10,19 +10,19 @@
  * The recipient receives more than one transfer when the send uses more than one note.
  * That is a consequence of cash and not a defect.
  *
- * The fee comes out of the notes, so the recipient receives less than the amount. The
- * screen shows both numbers, because the difference is the fee of every leg together.
+ * The recipient receives the amount exactly. The notes pay the fee in addition to it, so
+ * the wallet loses more than the amount. The screen shows both numbers.
  */
 
 import { useSignTransaction } from "@privy-io/react-auth";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { isAddress, parseUnits } from "viem";
 import type { Address } from "viem";
 import { usdc } from "../../lib/chain";
 import { putNotes } from "../../lib/notes";
-import { sendFromNote } from "../../lib/privy";
-import { InsufficientFunds, selectNotes, valueOf } from "../../lib/spend";
+import { legCost, sendFromNote } from "../../lib/privy";
+import { InsufficientFunds, selectNotes } from "../../lib/spend";
 import type { Selection } from "../../lib/spend";
 import { useVault } from "../../lib/vault";
 
@@ -34,15 +34,29 @@ export default function SendScreen() {
   const [step, setStep] = useState<string>();
   const [sent, setSent] = useState<bigint>();
   const [error, setError] = useState<string>();
+  const [cost, setCost] = useState<bigint>();
+
+  // The plan needs the fee, and the fee comes from the chain. Read it once for the screen.
+  useEffect(() => {
+    let live = true;
+    legCost().then(
+      (found) => live && setCost(found),
+      () => live && setCost(undefined),
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
 
   let plan: Selection | undefined;
   let planError: string | undefined;
   try {
-    plan = selectNotes(notes, parseUnits(amountText, 18));
+    if (cost !== undefined) plan = selectNotes(notes, parseUnits(amountText, 18), cost);
   } catch (err) {
     planError =
       err instanceof InsufficientFunds
-        ? `The wallet holds ${usdc(err.available)} and the send needs ${usdc(err.wanted)}.`
+        ? `The notes can send ${usdc(err.available)} and the send needs ${usdc(err.wanted)}. ` +
+          "The difference is the fee that each note pays."
         : err instanceof Error
           ? err.message
           : String(err);
@@ -62,12 +76,11 @@ export default function SendScreen() {
         const transfer = await sendFromNote(signTransaction, leg.note, to as Address, leg.amount);
         moved += transfer.sent;
 
-        // A note that gave everything it could is spent. A note that kept a remainder is
-        // still a note, and its value is now what the chain says it is.
-        const remainder = valueOf(leg.note) - leg.amount;
+        // `leg.remainder` is the value the note keeps. It already excludes the fee, so it
+        // is the new denomination. A note that keeps nothing is spent.
         await putNotes([
-          remainder > 0n
-            ? { ...leg.note, denom: remainder.toString() }
+          leg.remainder > 0n
+            ? { ...leg.note, denom: leg.remainder.toString() }
             : { ...leg.note, denom: "0", status: "spent" as const },
         ]);
       }
@@ -110,6 +123,7 @@ export default function SendScreen() {
 
       {to.length > 0 && !valid && <p className="fail">That is not an address.</p>}
       {planError && <p className="fail">{planError}</p>}
+      {cost === undefined && !planError && <p className="sub">Reading the fee.</p>}
 
       {plan && (
         <div className="card">
@@ -126,8 +140,8 @@ export default function SendScreen() {
             </div>
           ))}
           <p className="sub">
-            Each note pays its own fee, so the recipient receives a little less than{" "}
-            {usdc(plan.total)}.
+            The recipient receives {usdc(plan.total)}. The notes pay {usdc(plan.cost)} in fees,
+            so the wallet loses {usdc(plan.total + plan.cost)}.
           </p>
         </div>
       )}
