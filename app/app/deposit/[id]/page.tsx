@@ -41,6 +41,17 @@ import { useVault } from "../../../lib/vault";
 /** The mint answers a deposit in about a minute. */
 const POLL_MS = 4000;
 
+/**
+ * Report whether a note needs nothing more.
+ *
+ * A claimed note holds its money. An unused note never held any, because the mint left its
+ * point out of the announcement. A deposit is finished when every note is one or the other.
+ * A test for `claimed` alone never passes, because every deposit carries unused points.
+ */
+function settled(note: Note): boolean {
+  return note.status === "claimed" || note.status === "unused" || note.status === "spent";
+}
+
 export default function WaitScreen() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -156,17 +167,19 @@ export default function WaitScreen() {
           if (!announcement) return;
 
           setStep("Checking the signatures.");
-          const { ready, failed } = await applyAnnouncement(stored, announcement);
+          const { ready, unused, failed } = await applyAnnouncement(stored, announcement);
           if (failed.length > 0) setError(failed.join(". "));
-          if (ready.length > 0) {
-            await putNotes(ready);
+          // The unused points go to the disk with the signed ones. Without that step the
+          // deposit waits for a signature that the mint already decided not to make.
+          if (ready.length > 0 || unused.length > 0) {
+            await putNotes([...ready, ...unused]);
             await putDepositOnly({ ...deposit, status: "announced" });
             await claimAll(ready);
           }
         }
 
         const after = await notesOfDeposit(id);
-        if (after.length > 0 && after.every((n) => n.status === "claimed")) {
+        if (after.length > 0 && after.every((n) => settled(n))) {
           await putDepositOnly({ ...deposit, status: "claimed" });
           setStep("Done.");
         }
@@ -190,7 +203,7 @@ export default function WaitScreen() {
   if (!userId) return <main>Sign in first.</main>;
   if (!deposit) return <main>Reading the deposit.</main>;
 
-  const done = notes.length > 0 && notes.every((n) => n.status === "claimed");
+  const done = notes.length > 0 && notes.every(settled);
 
   return (
     <main>

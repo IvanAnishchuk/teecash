@@ -117,7 +117,7 @@ export async function findAnnouncement(
 export async function applyAnnouncement(
   notes: Note[],
   announcement: Announcement,
-): Promise<{ ready: Note[]; failed: string[] }> {
+): Promise<{ ready: Note[]; unused: Note[]; failed: string[] }> {
   const keys = await mintPubkeys();
   const d = domain();
   const ready: Note[] = [];
@@ -148,7 +148,18 @@ export async function applyAnnouncement(
     ready.push({ ...rest, denom: denom.toString(), sig: toHex(sig) as Hex, status: "ready" });
   });
 
-  return { ready, failed };
+  // Every deposit carries more points than the split needs, and the mint signs only the
+  // points it uses. A point that the announcement leaves out therefore holds no value and
+  // it never will. The announcement happens one time for one deposit.
+  const signed = new Set(announcement.pointIndexes.map((index) => Number(index)));
+  const unused = notes
+    .filter((note) => !signed.has(note.pointIndex) && note.status === "awaiting-mint")
+    .map((note) => {
+      const { r: _r, ...rest } = note;
+      return { ...rest, status: "unused" as const };
+    });
+
+  return { ready, unused, failed };
 }
 
 /**

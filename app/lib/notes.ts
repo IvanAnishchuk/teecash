@@ -33,8 +33,11 @@ const DEPOSITS = "deposits";
  * `ready` the client holds an unblinded signature and the claim has not landed.
  * `claimed` the money is in the wallet of the note.
  * `spent` the wallet is empty. The record stays, because a wallet can receive again.
+ * `unused` the announcement left this point out, so the mint never signed it. A deposit
+ * carries more points than the split needs, and this is the state of the rest. The note
+ * holds no value and it never will.
  */
-export type NoteStatus = "awaiting-mint" | "ready" | "claimed" | "spent";
+export type NoteStatus = "awaiting-mint" | "ready" | "claimed" | "spent" | "unused";
 
 /** The state of one deposit. */
 export type DepositStatus = "pending" | "announced" | "claimed" | "refunded";
