@@ -6,6 +6,7 @@
  *   npm run teecash -- deposit 111
  *   npm run teecash -- mint [id]
  *   npm run teecash -- claim [id]
+ *   npm run teecash -- relay [id]
  *   npm run teecash -- spend [id]
  *   npm run teecash -- status
  *   npm run teecash -- demo 111
@@ -15,9 +16,13 @@
  *
  * TEECASH_WALLETS picks the wallet provider. It takes `local` or `privy` and `local` is
  * the default. The `privy` provider needs PRIVY_APP_ID and PRIVY_APP_SECRET.
+ *
+ * TEECASH_RELAYER sets the relayer for the `relay` command. `claim` pays from the
+ * deployer and `relay` pays from the relayer. Only `relay` keeps the deposit and the
+ * note in separate transaction histories.
  */
 
-import { claim, deploy, deposit, mint, privyCheck, spend, status, sweep, sync } from "./commands.ts";
+import { claim, deploy, deposit, mint, privyCheck, relay, spend, status, sweep, sync } from "./commands.ts";
 
 const [command, argument] = process.argv.slice(2);
 
@@ -43,6 +48,7 @@ const commands: Record<string, () => Promise<void>> = {
   mint: () => mint(argument),
   sync: () => sync(argument),
   claim: () => claim(argument),
+  relay: () => relay(argument),
   spend: () => spend(argument),
   sweep: () => sweep(argument),
   status: () => status(),

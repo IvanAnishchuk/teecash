@@ -328,6 +328,51 @@ export async function claim(id?: string): Promise<void> {
 }
 
 /**
+ * Claim through the relayer.
+ *
+ * `claim` sends the transaction from the deployer. That account also made the deposit.
+ * The deposit and the note therefore share one transaction history. Blinding then buys
+ * nothing. The relayer is the third party that breaks that link. It pays the gas. It
+ * holds no note after it answers.
+ *
+ * The notes go one at a time. The relayer must not see the notes of one deposit as a
+ * group, because that group is the link that blinding removes.
+ */
+export async function relay(id?: string): Promise<void> {
+  const { account, publicClient } = await connect();
+  const state = load();
+  const record = findDeposit(state, id);
+  const url = process.env.TEECASH_RELAYER ?? "http://127.0.0.1:8787";
+
+  for (const note of record.notes) {
+    if (note.status !== "ready" || note.sig === undefined) continue;
+
+    // The request carries the wallet and the signature only. It names no denomination.
+    // The relayer derives that from the key that verifies.
+    const response = await fetch(`${url}/claim`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet: note.address, sig: note.sig }),
+    });
+    const body = (await response.json()) as { txHash?: string; gasUsed?: number; denom?: string; error?: string };
+    if (!response.ok) {
+      throw new Error(`relay: ${note.address} was refused with ${response.status}: ${body.error}`);
+    }
+
+    // The relayer derived the denomination. If it disagrees with the announcement, the
+    // client and the relayer read different keys.
+    if (note.denom !== undefined && body.denom !== note.denom) {
+      throw new Error(`relay: the relayer paid ${body.denom} and the announcement said ${note.denom}`);
+    }
+    note.status = "claimed";
+    const balance = await publicClient.getBalance({ address: note.address });
+    console.log(`${note.address} holds ${usdc(balance)} (relayer gas ${body.gasUsed})`);
+  }
+  save(state);
+  console.log(`the relayer paid for every claim. No note came from ${account.address}`);
+}
+
+/**
  * Spend from a funded wallet.
  *
  * Arc makes this step possible. The note is the gas token. The wallet therefore pays its
