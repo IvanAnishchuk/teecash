@@ -1,0 +1,10 @@
+{
+  "chainSelector": 3034092155422581607,
+  "blindMint": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+  "consumer": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+  "ladder": [
+    { "denom": "1000000", "secretId": "MINT_KEY_1_USDC" },
+    { "denom": "10000000", "secretId": "MINT_KEY_10_USDC" },
+    { "denom": "100000000", "secretId": "MINT_KEY_100_USDC" }
+  ]
+}

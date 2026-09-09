@@ -1,0 +1,24 @@
+# CRE project settings.
+#
+# The mint reads a deposit event on Arc. The mint then writes an announcement to Arc.
+# The CLI knows arc-testnet. The --allow-unknown-chains flag is therefore not necessary.
+#
+#   chain selector   3034092155422581607
+#   forwarder        0x76c9cf548b4179F8901cda1f8623568b58215E62
+#   mock forwarder   0x6E9EE680ef59ef64Aa8C7371279c27E496b5eDc1
+#
+# `cre workflow supported-chains` prints these.
+
+# staging points at a local anvil that emulates Arc. Start it with:
+#   anvil --chain-id 5042002 --hardfork osaka --base-fee 0 --gas-price 0
+# The chain ID matters. The contract builds its domain tag from block.chainid, so a
+# different chain ID gives a different tag.
+staging-settings:
+  rpcs:
+    - chain-name: arc-testnet
+      url: http://127.0.0.1:8545
+
+production-settings:
+  rpcs:
+    - chain-name: arc-testnet
+      url: https://rpc.testnet.arc.io
