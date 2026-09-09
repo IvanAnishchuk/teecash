@@ -28,10 +28,11 @@ import {
   getContractAddress,
   http,
   parseAbiParameters,
+  parseUnits,
   recoverTransactionAddress,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { type Address, type Hex, artifact, connect, usdc } from "./chain.ts";
+import { ONE_USDC, type Address, type Hex, artifact, connect, usdc } from "./chain.ts";
 import { type Note, type State, findDeposit, load, reset, save, statePath } from "./state.ts";
 import { providerOf, walletProvider } from "./wallets.ts";
 
@@ -61,7 +62,7 @@ export async function deploy(): Promise<void> {
   // same keys. A signature from the simulation is otherwise invalid for this
   // deployment. An environment variable therefore wins over a fresh random scalar.
   for (const denom of LADDER) {
-    const fromEnv = process.env[`SECRET_MINT_KEY_${denom / 1_000_000n}_USDC`];
+    const fromEnv = process.env[`SECRET_MINT_KEY_${denom / ONE_USDC}_USDC`];
     state.mintKeys[denom.toString()] = fromEnv
       ? (`0x${fromEnv.replace(/^0x/, "")}` as Hex)
       : `0x${randomScalar().toString(16).padStart(64, "0")}`;
@@ -110,7 +111,8 @@ export async function deposit(amountUsdc: string): Promise<void> {
   const { publicClient, walletClient } = await connect();
   const state = load();
   const domain = domainOf(state);
-  const amount = BigInt(Math.round(Number(amountUsdc) * 1e6));
+  // parseUnits keeps the full precision of 18 decimals. A float would lose it.
+  const amount = parseUnits(amountUsdc, 18);
 
   // The mint may pick any split. The deposit therefore carries the smallest split plus
   // slack.

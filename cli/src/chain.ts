@@ -79,11 +79,18 @@ export async function connect() {
 
 export type Chain = Awaited<ReturnType<typeof connect>>;
 
-/** Format a base-unit amount as USDC. */
+/** One USDC in native base units. The native token of Arc uses 18 decimals. */
+export const ONE_USDC = 10n ** 18n;
+
+/**
+ * Format a native amount as USDC.
+ *
+ * The output keeps 6 decimal places. The ERC-20 interface of Arc shows the same 6.
+ */
 export function usdc(amount: bigint): string {
-  const whole = amount / 1_000_000n;
-  const part = (amount % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
-  return part.length > 0 ? `${whole}.${part} USDC` : `${whole} USDC`;
+  const whole = amount / ONE_USDC;
+  const micro = ((amount % ONE_USDC) / 10n ** 12n).toString().padStart(6, "0").replace(/0+$/, "");
+  return micro.length > 0 ? `${whole}.${micro} USDC` : `${whole} USDC`;
 }
 
 export type { Address, Hex };

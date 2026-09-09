@@ -15,7 +15,8 @@ contract BlindMintTest is Test {
     uint256 internal constant CHAIN_ID = 5042002;
     address internal constant DEPLOYED_AT = 0x00000000000000000000000000000000000000C0;
     uint64 internal constant REFUND_DELAY = 1 days;
-    uint256 internal constant USDC = 1e6;
+    /// @dev The native token of Arc uses 18 decimals. One USDC is 10^18 base units.
+    uint256 internal constant USDC = 1e18;
 
     BlindMint internal mint;
     address internal forwarder = makeAddr("forwarder");

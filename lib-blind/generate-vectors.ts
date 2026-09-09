@@ -25,7 +25,7 @@ import {
 
 const DOMAIN: Domain = { chainId: 5042002, contract: "0x00000000000000000000000000000000000000c0" };
 
-const USDC = 1_000_000n;
+const USDC = 10n ** 18n;
 
 const KEYS = [
   { denom: 1n * USDC, sk: 0x2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2an },

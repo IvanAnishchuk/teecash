@@ -60,7 +60,7 @@ contract MintConsumerTest is Test {
         consumer = new MintConsumer(creForwarder, mint);
         assertEq(address(consumer), mint.forwarder(), "the consumer is not the forwarder");
 
-        vm.deal(depositor, 1000e6);
+        vm.deal(depositor, 1000e18);
     }
 
     function _report(uint256 id) internal view returns (bytes memory) {

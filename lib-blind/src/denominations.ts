@@ -8,10 +8,15 @@
  * templates permit 11 secrets for each invocation. A longer ladder is possible if the
  * note count becomes a problem.
  *
- * Values are USDC base units. USDC uses 6 decimals.
+ * Values are native base units.
+ *
+ * The native token of Arc is USDC and it uses 18 decimals. One USDC is 10^18 base units.
+ * The ERC-20 interface at 0x3600...0000 reports 6 decimals and shows the same balance
+ * truncated to those 6. A native balance is therefore the ERC-20 balance times 10^12.
+ * `deposit` and `claim` both use native units.
  */
 
-const USDC = 1_000_000n;
+const USDC = 10n ** 18n;
 
 /** The denominations, from small to large. */
 export const LADDER: readonly bigint[] = [1n * USDC, 10n * USDC, 100n * USDC];
