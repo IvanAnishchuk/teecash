@@ -319,13 +319,13 @@ export async function spend(id?: string): Promise<void> {
   if (!note) throw new Error("spend: no wallet holds a note");
 
   // The signer comes from whichever provider made this wallet.
-  const account = await providerOf(note).account(note);
-  const wallet = createWalletClient({ account, chain, transport: http() });
+  const signer = await providerOf(note).account(note);
+  const wallet = createWalletClient({ account: signer, chain, transport: http() });
 
   const before = await publicClient.getBalance({ address: note.address });
 
-  // Set the fee fields. The suggestion of the node carries a priority fee, and a local
-  // node prices gas in 18 decimals while a note holds 6.
+  // Set the fee fields. The suggestion of the node carries a priority fee that a local
+  // node does not need.
   const block = await publicClient.getBlock();
   const priority = BigInt(process.env.TEECASH_PRIORITY_FEE ?? "0");
   const maxFee = (block.baseFeePerGas ?? 0n) + priority;
