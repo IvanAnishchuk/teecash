@@ -3,6 +3,11 @@ pragma solidity ^0.8.28;
 
 import {BLS} from "./BLS.sol";
 
+/// @notice The receiver interface of the CRE forwarder.
+interface IReceiver {
+    function onReport(bytes calldata metadata, bytes calldata report) external;
+}
+
 /**
  * @title BlindMint
  * @notice Chaumian eCash where the note is a wallet.
@@ -17,7 +22,7 @@ import {BLS} from "./BLS.sol";
  *      The chain is Arc. The native token is USDC. A wallet that receives a note can spend
  *      it at once, because the note pays the gas token.
  */
-contract BlindMint {
+contract BlindMint is IReceiver {
     enum Status {
         None,
         Pending,
@@ -44,7 +49,9 @@ contract BlindMint {
 
     mapping(uint256 => Deposit) public deposits;
 
-    /// @notice The forwarder of the CRE workflow. Only this address can announce.
+    /// @notice The CRE forwarder. Only this address can deliver a report or announce.
+    /// @dev The forwarder calls `onReport`. This contract receives the report itself. The
+    ///      chain of trust runs from the CRE forwarder to the mint, with nothing between.
     address public immutable forwarder;
 
     /// @notice A depositor can reclaim a pending deposit after this delay.
@@ -151,6 +158,34 @@ contract BlindMint {
         uint256[] calldata denoms,
         bytes[] calldata blindSigs
     ) external onlyForwarder {
+        _announce(id, pointIndexes, denoms, blindSigs);
+    }
+
+    /**
+     * @notice Report support for an interface, per ERC-165.
+     * @dev The forwarder calls this function before it delivers a report. A receiver that
+     *      does not answer receives no report, and the forwarder still reports success.
+     *      This function is therefore necessary.
+     */
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == 0x01ffc9a7 || interfaceId == type(IReceiver).interfaceId;
+    }
+
+    /**
+     * @notice Receive one report from the CRE forwarder and announce it.
+     * @dev The report holds the values that `announce` takes. The Go workflow packs them
+     *      in `workflow/announce`. Both sides must use the same field order.
+     * @param report The packed announcement.
+     */
+    function onReport(bytes calldata, bytes calldata report) external onlyForwarder {
+        (uint256 id, uint256[] memory pointIndexes, uint256[] memory denoms, bytes[] memory blindSigs) =
+            abi.decode(report, (uint256, uint256[], uint256[], bytes[]));
+        _announce(id, pointIndexes, denoms, blindSigs);
+    }
+
+    function _announce(uint256 id, uint256[] memory pointIndexes, uint256[] memory denoms, bytes[] memory blindSigs)
+        private
+    {
         Deposit storage d = deposits[id];
         if (d.status != Status.Pending) revert BadDeposit(id);
         if (pointIndexes.length != denoms.length || denoms.length != blindSigs.length) revert LengthMismatch();

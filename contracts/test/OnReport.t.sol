@@ -2,21 +2,19 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {BlindMint} from "../src/BlindMint.sol";
-import {IReceiver, MintConsumer} from "../src/MintConsumer.sol";
+import {BlindMint, IReceiver} from "../src/BlindMint.sol";
 
 /**
  * @notice These tests run the path from a CRE report to a paid wallet.
  * @dev The report bytes here use the same field order as `workflow/announce` in Go. A
  *      change on one side needs the same change on the other.
  */
-contract MintConsumerTest is Test {
+contract OnReportTest is Test {
     uint256 internal constant CHAIN_ID = 5042002;
     address internal constant DEPLOYED_AT = 0x00000000000000000000000000000000000000C0;
     uint64 internal constant REFUND_DELAY = 1 days;
 
     BlindMint internal mint;
-    MintConsumer internal consumer;
     address internal creForwarder = makeAddr("creForwarder");
     address internal depositor = makeAddr("depositor");
     address internal stranger = makeAddr("stranger");
@@ -53,12 +51,9 @@ contract MintConsumerTest is Test {
         }
 
         vm.chainId(CHAIN_ID);
-        // The consumer is the forwarder of the mint. The test computes its address first.
-        address consumerAt = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
-        deployCodeTo("BlindMint.sol:BlindMint", abi.encode(consumerAt, REFUND_DELAY, denoms, pubkeys), DEPLOYED_AT);
+        // The CRE forwarder writes straight to the mint. Nothing sits between them.
+        deployCodeTo("BlindMint.sol:BlindMint", abi.encode(creForwarder, REFUND_DELAY, denoms, pubkeys), DEPLOYED_AT);
         mint = BlindMint(DEPLOYED_AT);
-        consumer = new MintConsumer(creForwarder, mint);
-        assertEq(address(consumer), mint.forwarder(), "the consumer is not the forwarder");
 
         vm.deal(depositor, 1000e18);
     }
@@ -90,7 +85,7 @@ contract MintConsumerTest is Test {
         uint256 id = _deposit();
 
         vm.prank(creForwarder);
-        consumer.onReport("", _report(id));
+        mint.onReport("", _report(id));
         assertEq(mint.totalAnnounced(), totalValue);
 
         for (uint256 i = 0; i < noteCount; i++) {
@@ -107,29 +102,32 @@ contract MintConsumerTest is Test {
      *      without a revert.
      */
     function test_supportsInterface_answersTheForwarder() public view {
-        assertTrue(consumer.supportsInterface(0x01ffc9a7), "ERC-165 is not supported");
-        assertTrue(consumer.supportsInterface(IReceiver.onReport.selector), "IReceiver is not supported");
-        assertFalse(consumer.supportsInterface(0xffffffff));
+        assertTrue(mint.supportsInterface(0x01ffc9a7), "ERC-165 is not supported");
+        assertTrue(mint.supportsInterface(IReceiver.onReport.selector), "IReceiver is not supported");
+        assertFalse(mint.supportsInterface(0xffffffff));
     }
 
     function test_onReport_rejectsAnotherSender() public {
         uint256 id = _deposit();
         vm.prank(stranger);
-        vm.expectRevert(MintConsumer.NotCreForwarder.selector);
-        consumer.onReport("", _report(id));
+        vm.expectRevert(BlindMint.NotForwarder.selector);
+        mint.onReport("", _report(id));
     }
 
-    function test_announce_rejectsACallThatSkipsTheConsumer() public {
+    /// @notice The report path and the direct path reach the same state.
+    function test_announce_acceptsTheForwarderDirectly() public {
         uint256 id = _deposit();
-        uint256[] memory idx = new uint256[](1);
-        uint256[] memory denoms = new uint256[](1);
-        bytes[] memory sigs = new bytes[](1);
-        idx[0] = 0;
-        denoms[0] = totalValue;
-        sigs[0] = blindSigOf[0];
+        uint256[] memory idx = new uint256[](noteCount);
+        uint256[] memory denoms = new uint256[](noteCount);
+        bytes[] memory sigs = new bytes[](noteCount);
+        for (uint256 i = 0; i < noteCount; i++) {
+            idx[i] = i;
+            denoms[i] = denomOf[i];
+            sigs[i] = blindSigOf[i];
+        }
 
         vm.prank(creForwarder);
-        vm.expectRevert(BlindMint.NotForwarder.selector);
         mint.announce(id, idx, denoms, sigs);
+        assertEq(mint.totalAnnounced(), totalValue);
     }
 }
