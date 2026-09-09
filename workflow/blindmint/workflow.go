@@ -31,10 +31,8 @@ type Config struct {
 	// ChainSelector names the chain of the BlindMint contract. Arc testnet is
 	// 3034092155422581607. `cre workflow supported-chains` prints it.
 	ChainSelector uint64 `json:"chainSelector"`
-	// BlindMint is the contract that emits the deposit event.
+	// BlindMint emits the deposit event and receives the report.
 	BlindMint string `json:"blindMint"`
-	// Consumer receives the report and calls announce.
-	Consumer string `json:"consumer"`
 	// Ladder pairs each denomination with the secret that holds its key.
 	Ladder []LadderEntry `json:"ladder"`
 }
@@ -113,7 +111,7 @@ func onDeposit(config *Config, runtime cre.TeeRuntime, log *evm.Log) (string, er
 
 	client := &evm.Client{ChainSelector: config.ChainSelector}
 	write, err := evm.X_GeneratedCodeOnly_Wrap_WriteCreReportRequest(&evm.WriteReportRequest{
-		Receiver: announce.Address(config.Consumer),
+		Receiver: announce.Address(config.BlindMint),
 		Report:   signed.X_GeneratedCodeOnly_Unwrap(),
 	})
 	if err != nil {

@@ -1,8 +1,8 @@
 // Package announce encodes and decodes the two payloads that cross the chain boundary.
 //
-// It reads the deposit event of BlindMint. It writes the report that MintConsumer
-// converts into a call to announce. The package has no TEE dependency. The tests
-// therefore run on the host.
+// It reads the deposit event of BlindMint. It writes the report that BlindMint converts
+// into an announcement. The package has no TEE dependency. The tests therefore run on
+// the host.
 package announce
 
 import (
@@ -27,8 +27,8 @@ var depositedArgs = mustArgs(`[
   {"name":"blindedPoints","type":"bytes[]"}
 ]`)
 
-// reportArgs are the fields of the report. MintConsumer decodes them and calls announce
-// with the same values.
+// reportArgs are the fields of the report. BlindMint decodes them in `onReport` and
+// announces the same values.
 var reportArgs = mustArgs(`[
   {"name":"id","type":"uint256"},
   {"name":"pointIndexes","type":"uint256[]"},
@@ -92,7 +92,7 @@ func DecodeDeposit(topics [][]byte, data []byte) (*Deposit, error) {
 	return &Deposit{ID: new(big.Int).SetBytes(topics[1]), Amount: amount, BlindedPoints: points}, nil
 }
 
-// EncodeReport packs the notes for MintConsumer.
+// EncodeReport packs the notes for BlindMint.
 func EncodeReport(id *big.Int, notes []mint.Note) ([]byte, error) {
 	indexes := make([]*big.Int, len(notes))
 	denoms := make([]*big.Int, len(notes))
@@ -109,8 +109,8 @@ func EncodeReport(id *big.Int, notes []mint.Note) ([]byte, error) {
 	return packed, nil
 }
 
-// DecodeReport reverses EncodeReport. The tests use it. MintConsumer does the same work
-// in Solidity.
+// DecodeReport reverses EncodeReport. The tests use it. BlindMint does the same work in
+// Solidity.
 func DecodeReport(report []byte) (id *big.Int, indexes, denoms []*big.Int, sigs [][]byte, err error) {
 	values, err := reportArgs.Unpack(report)
 	if err != nil {
