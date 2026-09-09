@@ -3,6 +3,11 @@ pragma solidity ^0.8.28;
 
 import {BlindMint} from "./BlindMint.sol";
 
+/// @notice The receiver interface of the CRE forwarder.
+interface IReceiver {
+    function onReport(bytes calldata metadata, bytes calldata report) external;
+}
+
 /**
  * @title MintConsumer
  * @notice The receiver of the CRE report. It calls `announce` on BlindMint.
@@ -20,6 +25,16 @@ contract MintConsumer {
     BlindMint public immutable blindMint;
 
     error NotCreForwarder();
+
+    /**
+     * @notice Report support for an interface, per ERC-165.
+     * @dev The forwarder calls this function before it delivers a report. A receiver
+     *      that does not answer receives no report. The forwarder still reports success
+     *      in that case. This function is therefore necessary.
+     */
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == 0x01ffc9a7 || interfaceId == type(IReceiver).interfaceId;
+    }
 
     constructor(address creForwarder_, BlindMint blindMint_) {
         creForwarder = creForwarder_;

@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {BlindMint} from "../src/BlindMint.sol";
-import {MintConsumer} from "../src/MintConsumer.sol";
+import {IReceiver, MintConsumer} from "../src/MintConsumer.sol";
 
 /**
  * @notice These tests run the path from a CRE report to a paid wallet.
@@ -98,6 +98,18 @@ contract MintConsumerTest is Test {
             assertEq(walletOf[i].balance, denomOf[i], "the wallet did not receive its note");
         }
         assertEq(address(mint).balance, 0);
+    }
+
+    /**
+     * @notice The forwarder checks ERC-165 before it delivers a report.
+     * @dev A receiver that fails this check receives no report. The forwarder swallows
+     *      the failure and its own transaction still succeeds, so the report disappears
+     *      without a revert.
+     */
+    function test_supportsInterface_answersTheForwarder() public view {
+        assertTrue(consumer.supportsInterface(0x01ffc9a7), "ERC-165 is not supported");
+        assertTrue(consumer.supportsInterface(IReceiver.onReport.selector), "IReceiver is not supported");
+        assertFalse(consumer.supportsInterface(0xffffffff));
     }
 
     function test_onReport_rejectsAnotherSender() public {
