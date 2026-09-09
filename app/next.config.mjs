@@ -38,6 +38,11 @@ const OPTIONAL_PEERS = [
 
 const config = {
   transpilePackages: ["@teecash/lib-blind"],
+  // Next.js starts one worker for each core minus one. This machine is a laptop and the
+  // developer uses it while the build runs. Two workers keep the build off every core.
+  // The count applies to page generation, to the webpack build worker and to the minify
+  // pass.
+  experimental: { cpus: 2 },
   // Next.js writes its own AGENTS.md and CLAUDE.md into this directory. The repository
   // holds its conventions in the CLAUDE.md at the root, and a second file here competes
   // with it.
@@ -47,6 +52,11 @@ const config = {
   outputFileTracingRoot: new URL("..", import.meta.url).pathname,
   webpack(webpackConfig) {
     for (const name of OPTIONAL_PEERS) webpackConfig.resolve.alias[name] = false;
+    // `experimental.cpus` bounds the worker count. It does not bound the work inside one
+    // worker. This bounds how many modules webpack compiles at the same time. The default
+    // is 100. Keep this value generous. A small value makes the build much slower and it
+    // does not reduce the peak load more.
+    webpackConfig.parallelism = 16;
     return webpackConfig;
   },
 };
