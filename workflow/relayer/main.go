@@ -40,13 +40,22 @@ import (
 // oneUsdc is one USDC in native base units. The native token of Arc uses 18 decimals.
 var oneUsdc = new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 
+// oneCent is one hundredth of a USDC. The ladder starts here.
+var oneCent = new(big.Int).Div(oneUsdc, big.NewInt(100))
+
 // ladder mirrors LADDER in lib-blind/src/denominations.ts.
 //
 // The relayer probes each rung against the contract at startup. The contract answers
 // with the public key. A rung with no key is not part of the deployment. This list is
 // therefore the set of rungs to ask about. The contract stays the source of truth.
+//
+// A rung that this list omits can never pay. The relayer finds the denomination of a note
+// from the key that verifies its signature, and it only holds the keys of these rungs.
 func ladder() []*big.Int {
-	out := make([]*big.Int, 0, 3)
+	out := make([]*big.Int, 0, 5)
+	for _, n := range []int64{1, 10} {
+		out = append(out, new(big.Int).Mul(big.NewInt(n), oneCent))
+	}
 	for _, n := range []int64{1, 10, 100} {
 		out = append(out, new(big.Int).Mul(big.NewInt(n), oneUsdc))
 	}
