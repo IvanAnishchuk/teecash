@@ -18,8 +18,38 @@
 
 const USDC = 10n ** 18n;
 
-/** The denominations, from small to large. */
-export const LADDER: readonly bigint[] = [1n * USDC, 10n * USDC, 100n * USDC];
+/** One hundredth of a USDC. The ladder starts here. */
+export const CENT = USDC / 100n;
+
+/**
+ * The denominations, from small to large.
+ *
+ * The ladder starts at one cent so that a wallet can make any amount to the cent. A send
+ * of an exact amount then needs to break a note less often.
+ */
+export const LADDER: readonly bigint[] = [1n * CENT, 10n * CENT, 1n * USDC, 10n * USDC, 100n * USDC];
+
+/**
+ * The name of the mint key of each denomination.
+ *
+ * The name is a table and not a calculation. An earlier version built the name from
+ * `denom / USDC`, and that division gives zero for every denomination below one USDC. The
+ * one cent rung and the ten cent rung then share one name.
+ */
+const SECRET_IDS: ReadonlyMap<bigint, string> = new Map([
+  [1n * CENT, "MINT_KEY_1_CENT"],
+  [10n * CENT, "MINT_KEY_10_CENT"],
+  [1n * USDC, "MINT_KEY_1_USDC"],
+  [10n * USDC, "MINT_KEY_10_USDC"],
+  [100n * USDC, "MINT_KEY_100_USDC"],
+]);
+
+/** The name of the mint key of one denomination. The function throws on a value off the ladder. */
+export function secretId(denom: bigint): string {
+  const name = SECRET_IDS.get(denom);
+  if (name === undefined) throw new Error(`denominations: ${denom} is not a denomination`);
+  return name;
+}
 
 export const MIN_DENOM = LADDER[0];
 

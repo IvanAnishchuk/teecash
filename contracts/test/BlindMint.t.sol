@@ -150,9 +150,16 @@ contract BlindMintTest is Test {
     function test_announce_rejectsASumThatDiffers() public {
         uint256 id = _deposit();
         (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) = _announcement();
+        // The change is the new denomination less the old one. Reading the old one keeps
+        // this test correct when the ladder gains a rung.
+        uint256 replaced = denoms[0];
         denoms[0] = 10 * USDC;
         vm.prank(forwarder);
-        vm.expectRevert(abi.encodeWithSelector(BlindMint.SumMismatch.selector, totalValue + 9 * USDC, totalValue));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                BlindMint.SumMismatch.selector, totalValue + 10 * USDC - replaced, totalValue
+            )
+        );
         mint.announce(id, idx, denoms, sigs);
     }
 

@@ -11,6 +11,7 @@
 import { writeFileSync } from "node:fs";
 import {
   type Domain,
+  LADDER,
   blind,
   blindSign,
   dst,
@@ -27,16 +28,30 @@ const DOMAIN: Domain = { chainId: 5042002, contract: "0x000000000000000000000000
 
 const USDC = 10n ** 18n;
 
+const CENT = USDC / 100n;
+
+// One key for each rung of `LADDER`. The scalars are fixed, because the vectors must not
+// change between two runs of this file.
 const KEYS = [
+  { denom: 1n * CENT, sk: 0x1717171717171717171717171717171717171717171717171717171717171717n },
+  { denom: 10n * CENT, sk: 0x2929292929292929292929292929292929292929292929292929292929292929n },
   { denom: 1n * USDC, sk: 0x2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2an },
   { denom: 10n * USDC, sk: 0x3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3bn },
   { denom: 100n * USDC, sk: 0x5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5d5dn },
 ].map((k) => mintKey(k.denom, k.sk));
 
+if (KEYS.length !== LADDER.length) {
+  throw new Error(`vectors: ${KEYS.length} keys for ${LADDER.length} denominations`);
+}
+
+// One note for each key, so that every rung of the ladder verifies in all three
+// implementations.
 const NOTES = [
   { address: "0x1111111111111111111111111111111111111111", r: 0x4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4cn, keyIndex: 0 },
   { address: "0x2222222222222222222222222222222222222222", r: 0x6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6e6en, keyIndex: 1 },
-  { address: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", r: 0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5an, keyIndex: 2 },
+  { address: "0x3333333333333333333333333333333333333333", r: 0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1dn, keyIndex: 2 },
+  { address: "0x4444444444444444444444444444444444444444", r: 0x3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3dn, keyIndex: 3 },
+  { address: "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", r: 0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5an, keyIndex: 4 },
 ];
 
 const notes = NOTES.map((n) => {
@@ -64,7 +79,7 @@ const vectors = {
   domain: { chainId: DOMAIN.chainId, contract: DOMAIN.contract, dst: toHex(dst(DOMAIN)) },
   keys: KEYS.map((k) => ({ denom: k.denom.toString(), sk: `0x${k.sk.toString(16).padStart(64, "0")}`, pk: toHex(k.pk) })),
   notes,
-  splits: [111n * USDC, 100n * USDC, 1n * USDC].map((amount) => ({
+  splits: [111n * USDC, 100n * USDC, 1n * USDC, 1n * CENT, 111n * CENT].map((amount) => ({
     amount: amount.toString(),
     split: splitGreedy(amount).map((d) => d.toString()),
   })),

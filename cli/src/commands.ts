@@ -10,6 +10,7 @@
 
 import {
   LADDER,
+  secretId,
   type Domain,
   blind,
   blindSign,
@@ -75,7 +76,7 @@ export async function deploy(): Promise<void> {
   // same keys. A signature from the simulation is otherwise invalid for this
   // deployment. An environment variable therefore wins over a fresh random scalar.
   for (const denom of LADDER) {
-    const fromEnv = process.env[`SECRET_MINT_KEY_${denom / ONE_USDC}_USDC`];
+    const fromEnv = process.env[`SECRET_${secretId(denom)}`];
     state.mintKeys[denom.toString()] = fromEnv
       ? (`0x${fromEnv.replace(/^0x/, "")}` as Hex)
       : `0x${randomScalar().toString(16).padStart(64, "0")}`;
