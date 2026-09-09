@@ -182,6 +182,18 @@ export interface RelayResult {
   denom: string;
 }
 
+/**
+ * The contract already paid this wallet.
+ *
+ * The note holds its money, so the caller marks the note claimed and continues. A claim
+ * that lands after the relayer stops waiting gives this answer on the next try.
+ */
+export class AlreadyClaimed extends Error {
+  constructor(readonly wallet: string) {
+    super(`relay: the wallet ${wallet} already claimed`);
+  }
+}
+
 export async function relayClaim(note: Note): Promise<RelayResult> {
   if (note.sig === undefined) throw new Error(`relay: the note ${note.address} has no signature`);
 
@@ -192,6 +204,10 @@ export async function relayClaim(note: Note): Promise<RelayResult> {
   });
   const body = (await response.json()) as Partial<RelayResult> & { error?: string };
   if (!response.ok) {
+    // The contract keeps a claimed set and it refuses a second claim on one wallet. That
+    // answer is not a failure. It says the note holds its money already, which happens when
+    // an earlier claim landed on the chain after the relayer stopped waiting for it.
+    if (response.status === 409) throw new AlreadyClaimed(note.address);
     throw new Error(body.error ?? `relay: the relayer answered ${response.status}`);
   }
   if (!body.txHash) throw new Error("relay: the relayer returned no transaction hash");
