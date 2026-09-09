@@ -16,6 +16,11 @@ type vectors struct {
 		Keys  int `json:"keys"`
 		Notes int `json:"notes"`
 	} `json:"counts"`
+	Domain struct {
+		ChainID  int    `json:"chainId"`
+		Contract string `json:"contract"`
+		Dst      string `json:"dst"`
+	} `json:"domain"`
 	Keys []struct {
 		Denom string `json:"denom"`
 		Sk    string `json:"sk"`
@@ -27,6 +32,8 @@ type vectors struct {
 		KeyIndex int    `json:"keyIndex"`
 		Blinded  string `json:"blinded"`
 		BlindSig string `json:"blindSig"`
+		HashToG2 string `json:"hashToG2"`
+		Sig      string `json:"sig"`
 	} `json:"notes"`
 }
 
