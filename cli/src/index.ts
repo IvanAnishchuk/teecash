@@ -17,7 +17,7 @@
  * the default. The `privy` provider needs PRIVY_APP_ID and PRIVY_APP_SECRET.
  */
 
-import { claim, deploy, deposit, mint, privyCheck, spend, status } from "./commands.ts";
+import { claim, deploy, deposit, mint, privyCheck, spend, status, sync } from "./commands.ts";
 
 const [command, argument] = process.argv.slice(2);
 
@@ -41,6 +41,7 @@ const commands: Record<string, () => Promise<void>> = {
   deploy: () => deploy(),
   deposit: () => deposit(argument ?? "111"),
   mint: () => mint(argument),
+  sync: () => sync(argument),
   claim: () => claim(argument),
   spend: () => spend(argument),
   status: () => status(),

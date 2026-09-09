@@ -212,6 +212,57 @@ export async function mint(id?: string): Promise<void> {
   console.log(`gas ${receipt.gasUsed}`);
 }
 
+/**
+ * Read an announcement from the chain and unblind it.
+ *
+ * The client learns the split here. The mint chooses it, so the client cannot predict
+ * which point carries which denomination. The event carries that assignment.
+ *
+ * This is the step that follows a CRE mint. The local `mint` command does the same work
+ * and skips the chain read.
+ */
+export async function sync(id?: string): Promise<void> {
+  const { publicClient } = await connect();
+  const state = load();
+  const domain = domainOf(state);
+  const record = findDeposit(state, id);
+  const keys = keysOf(state);
+
+  const logs = await publicClient.getContractEvents({
+    address: state.blindMint as Address,
+    abi: blindMintAbi,
+    eventName: "Announced",
+    fromBlock: 0n,
+    args: { id: BigInt(record.id) },
+  });
+  if (logs.length === 0) throw new Error(`sync: deposit ${record.id} has no announcement`);
+
+  const { pointIndexes, denoms, blindSigs } = (
+    logs[0] as unknown as {
+      args: { pointIndexes: bigint[]; denoms: bigint[]; blindSigs: Hex[] };
+    }
+  ).args;
+
+  pointIndexes.forEach((pointIndex, i) => {
+    const note = record.notes.find((n) => n.pointIndex === Number(pointIndex));
+    if (!note) throw new Error(`sync: the deposit holds no point ${pointIndex}`);
+    const denom = denoms[i];
+    const key = keys.find((k) => k.denom === denom);
+    if (!key) throw new Error(`sync: there is no key for ${denom}`);
+
+    const sig = unblind(fromHex(blindSigs[i], "bytes"), fromHex(note.r, "bytes"));
+    if (!verify(key.pk, note.address, sig, domain)) {
+      throw new Error(`sync: the signature for ${note.address} does not verify`);
+    }
+    note.denom = denom.toString();
+    note.sig = toHex(sig) as Hex;
+    note.status = "ready";
+    console.log(`point ${pointIndex} -> ${note.address} ${usdc(denom)}`);
+  });
+  save(state);
+  console.log(`${pointIndexes.length} notes are ready to claim`);
+}
+
 export async function claim(id?: string): Promise<void> {
   const { publicClient, walletClient } = await connect();
   const state = load();
