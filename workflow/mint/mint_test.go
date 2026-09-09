@@ -137,9 +137,15 @@ func newMint(t *testing.T, v vectors) *Mint {
 	return m
 }
 
+// oneUsdc is one USDC in base units. The native token of Arc uses 18 decimals, and the
+// ladder is priced in the same units.
+func oneUsdc() *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
+}
+
 func TestSplit(t *testing.T) {
 	m := newMint(t, load(t))
-	usdc := big.NewInt(1_000_000)
+	usdc := oneUsdc()
 
 	cases := []struct {
 		amount int64
@@ -174,7 +180,7 @@ func TestSplit(t *testing.T) {
 
 func TestSplitRejectsTooFewPoints(t *testing.T) {
 	m := newMint(t, load(t))
-	amount := new(big.Int).Mul(big.NewInt(23), big.NewInt(1_000_000))
+	amount := new(big.Int).Mul(big.NewInt(23), oneUsdc())
 	if _, err := m.Split(amount, 2); err == nil {
 		t.Error("Split accepted 2 points for a split that needs 5")
 	}
