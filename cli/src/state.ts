@@ -36,6 +36,8 @@ export interface Note {
 export interface DepositRecord {
   id: string;
   amount: string;
+  /** The block that holds the deposit. A log search starts here. */
+  block?: string;
   notes: Note[];
 }
 

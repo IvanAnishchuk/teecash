@@ -150,7 +150,12 @@ export async function deposit(amountUsdc: string): Promise<void> {
   });
   const id = (logs[0] as unknown as { args: { id: bigint } }).args.id;
 
-  state.deposits.push({ id: id.toString(), amount: amount.toString(), notes });
+  state.deposits.push({
+    id: id.toString(),
+    amount: amount.toString(),
+    block: receipt.blockNumber.toString(),
+    notes,
+  });
   save(state);
 
   console.log(`deposit ${id} of ${usdc(amount)} against ${count} points`);
@@ -230,11 +235,17 @@ export async function sync(id?: string): Promise<void> {
   const record = findDeposit(state, id);
   const keys = keysOf(state);
 
+  // Arc prunes history, so a search from block zero fails. The deposit block bounds it.
+  // An older state file has no block, so the search falls back to a recent window.
+  const head = await publicClient.getBlockNumber();
+  const window = BigInt(process.env.TEECASH_LOG_WINDOW ?? "50000");
+  const fromBlock = record.block !== undefined ? BigInt(record.block) : head > window ? head - window : 0n;
+
   const logs = await publicClient.getContractEvents({
     address: state.blindMint as Address,
     abi: blindMintAbi,
     eventName: "Announced",
-    fromBlock: 0n,
+    fromBlock,
     args: { id: BigInt(record.id) },
   });
   if (logs.length === 0) throw new Error(`sync: deposit ${record.id} has no announcement`);
