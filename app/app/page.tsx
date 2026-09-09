@@ -3,8 +3,11 @@
 /**
  * The balance screen.
  *
- * One number, then the notes as denominations, then the deposits that are not finished.
- * Two actions leave this screen. One deposits and one sends.
+ * One number and two actions. A person who holds cash knows the total, so this screen
+ * shows the total first.
+ *
+ * The notes, the denominations and the deposits sit behind a summary that stays closed. A
+ * developer reads them when the client fails. A user does not need them.
  */
 
 import { usePrivy } from "@privy-io/react-auth";
@@ -48,11 +51,11 @@ export default function Balance() {
   return (
     <main>
       <h1>{usdc(balance)}</h1>
-      <p className="sub">{loading ? "Reading the notes." : `${groups.length} denomination(s)`}</p>
+      {loading && <p className="sub">Reading the notes.</p>}
 
       <div className="row">
         <Link href="/deposit">
-          <button>Deposit</button>
+          <button>Add money</button>
         </Link>
         <Link href="/send">
           <button className="ghost" disabled={balance === 0n}>
@@ -61,21 +64,9 @@ export default function Balance() {
         </Link>
       </div>
 
-      {groups.length > 0 && (
-        <div className="card">
-          <strong>Notes</strong>
-          {groups.map((group) => (
-            <div key={group.denom.toString()} className="line">
-              <span>{usdc(group.denom)}</span>
-              <span className="dim">{group.count}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {unfinished.length > 0 && (
         <div className="card">
-          <strong>Deposits</strong>
+          <strong>Waiting</strong>
           {unfinished.map((deposit) => (
             <div key={deposit.id} className="line">
               <span>{usdc(fromAmount(deposit.amount))}</span>
@@ -86,8 +77,22 @@ export default function Balance() {
         </div>
       )}
 
-      {groups.length === 0 && unfinished.length === 0 && !loading && (
-        <p className="sub">There are no notes yet. Start with a deposit.</p>
+      {balance === 0n && unfinished.length === 0 && !loading && (
+        <p className="sub">There is no money here yet. Add some.</p>
+      )}
+
+      {groups.length > 0 && (
+        <details>
+          <summary className="sub">Notes</summary>
+          <div className="card">
+            {groups.map((group) => (
+              <div key={group.denom.toString()} className="line">
+                <span>{usdc(group.denom)}</span>
+                <span className="dim">{group.count}</span>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
 
       <button className="ghost" onClick={logout}>

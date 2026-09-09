@@ -3,18 +3,18 @@
 /**
  * The send screen.
  *
- * An address and an amount. The screen shows which notes it will use before it sends
- * anything. Each note signs its own transaction through Privy and each note pays its own
- * fee.
+ * An address and an amount. The user gives nothing else.
  *
- * The recipient receives more than one transfer when the send uses more than one note.
- * That is a consequence of cash and not a defect.
+ * The send empties whole notes into one new wallet and then pays the recipient from that
+ * wallet. The recipient sees one transfer, whatever the note count is. The sweeps move
+ * money that stays with the user, so Privy signs them without a prompt. The payment is the
+ * one step the user confirms.
  *
- * The recipient receives the amount exactly. The notes pay the fee in addition to it, so
- * the wallet loses more than the amount. The screen shows both numbers.
+ * The new wallet keeps the change. That change stays spendable and it waits for a melt.
+ * A melt makes ladder notes from it.
  */
 
-import { useSignTransaction } from "@privy-io/react-auth";
+import { useCreateWallet, useSignTransaction, useWallets } from "@privy-io/react-auth";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { isAddress, parseUnits } from "viem";
@@ -22,22 +22,24 @@ import type { Address } from "viem";
 import { usdc } from "../../lib/chain";
 import { explain } from "../../lib/errors";
 import { putNotes } from "../../lib/notes";
-import { legCost, sendFromNote } from "../../lib/privy";
-import { InsufficientFunds, selectNotes } from "../../lib/spend";
-import type { Selection } from "../../lib/spend";
+import { createNoteWallets, legCost, sendFromWallet } from "../../lib/privy";
+import { InsufficientFunds, planSweep, valueOf } from "../../lib/spend";
+import type { SweepPlan } from "../../lib/spend";
 import { useVault } from "../../lib/vault";
 
 export default function SendScreen() {
   const { userId, notes, balance, reload } = useVault();
   const { signTransaction } = useSignTransaction();
+  const { createWallet } = useCreateWallet();
+  const { wallets } = useWallets();
   const [to, setTo] = useState("");
-  const [amountText, setAmountText] = useState("1");
+  const [amountText, setAmountText] = useState("");
   const [step, setStep] = useState<string>();
   const [sent, setSent] = useState<bigint>();
   const [error, setError] = useState<string>();
   const [cost, setCost] = useState<bigint>();
 
-  // The plan needs the fee, and the fee comes from the chain. Read it once for the screen.
+  // The plan needs the gas price, and the gas price comes from the chain. Read it once.
   useEffect(() => {
     let live = true;
     legCost().then(
@@ -49,46 +51,79 @@ export default function SendScreen() {
     };
   }, []);
 
-  let plan: Selection | undefined;
+  let plan: SweepPlan | undefined;
   let planError: string | undefined;
-  try {
-    if (cost !== undefined) plan = selectNotes(notes, parseUnits(amountText, 18), cost);
-  } catch (err) {
-    planError =
-      err instanceof InsufficientFunds
-        ? `The notes can send ${usdc(err.available)} and the send needs ${usdc(err.wanted)}. ` +
-          "The difference is the fee that each note pays."
-        : explain(err, "That amount does not work. Check it and try again.");
+  if (amountText.length > 0) {
+    try {
+      if (cost !== undefined) plan = planSweep(notes, parseUnits(amountText, 18), cost);
+    } catch (err) {
+      planError =
+        err instanceof InsufficientFunds
+          ? `You can send ${usdc(err.available)}. The rest of the balance pays the gas.`
+          : explain(err, "That amount does not work. Check it and try again.");
+    }
   }
 
   const valid = isAddress(to);
 
   async function send() {
-    if (!plan || !valid) return;
+    if (!plan || !valid || !userId) return;
     setError(undefined);
-    let moved = 0n;
+    setSent(undefined);
     try {
-      // The legs go in order. The last leg is the one that breaks a note, so an
-      // interruption leaves the broken note for last and every earlier note empty.
-      for (const leg of plan.legs) {
-        setStep(`Sending ${usdc(leg.amount)} from ${leg.note.address.slice(0, 12)}…`);
-        const transfer = await sendFromNote(signTransaction, leg.note, to as Address, leg.amount);
-        moved += transfer.sent;
+      // The new wallet holds the money for one moment. It belongs to this user, so the
+      // money stays with the user until the payment.
+      setStep("Preparing.");
+      const embedded = wallets.filter((w) => w.connectorType === "embedded");
+      const [pocket] = await createNoteWallets(createWallet, embedded.length, 1);
 
-        // `leg.remainder` is the value the note keeps. It already excludes the fee, so it
-        // is the new denomination. A note that keeps nothing is spent.
+      // Each note goes whole and each sweep pays one share of the gas. A note that gave
+      // everything is spent. The record changes as each sweep lands, so a failure in the
+      // middle leaves a balance that matches the chain.
+      const each = plan.cost / BigInt(plan.notes.length + 1);
+      for (const note of plan.notes) {
+        setStep(`Collecting ${usdc(valueOf(note))}.`);
+        await sendFromWallet(
+          signTransaction,
+          note.address,
+          pocket.address,
+          valueOf(note) - each,
+          false,
+        );
+        await putNotes([{ ...note, denom: "0", status: "spent" as const }]);
+      }
+
+      setStep("Confirm the payment in your wallet.");
+      const paid = await sendFromWallet(
+        signTransaction,
+        pocket.address,
+        to as Address,
+        plan.amount,
+        true,
+      );
+
+      // The change stays in the new wallet and the balance still counts it.
+      if (plan.remainder > 0n) {
         await putNotes([
-          leg.remainder > 0n
-            ? { ...leg.note, denom: leg.remainder.toString() }
-            : { ...leg.note, denom: "0", status: "spent" as const },
+          {
+            address: pocket.address,
+            userId,
+            depositId: "change",
+            walletId: pocket.walletId,
+            pointIndex: 0,
+            blinded: "0x00",
+            denom: plan.remainder.toString(),
+            status: "claimed" as const,
+          },
         ]);
       }
-      setSent(moved);
+
+      setSent(paid.sent);
       setStep(undefined);
       await reload();
     } catch (err) {
       setStep(undefined);
-      setError(explain(err, "The send stopped. Read the notes below for what moved."));
+      setError(explain(err, "The send stopped. Your balance shows what moved."));
       await reload();
     }
   }
@@ -98,7 +133,7 @@ export default function SendScreen() {
   return (
     <main>
       <h1>Send</h1>
-      <p className="sub">The wallet holds {usdc(balance)}.</p>
+      <p className="sub">You can send up to {usdc(balance)}.</p>
 
       <label>
         <span>To</span>
@@ -117,32 +152,18 @@ export default function SendScreen() {
           onChange={(e) => setAmountText(e.target.value)}
           disabled={step !== undefined}
           inputMode="decimal"
+          placeholder="0.00"
         />
       </label>
 
       {to.length > 0 && !valid && <p className="fail">That is not an address.</p>}
       {planError && <p className="fail">{planError}</p>}
-      {cost === undefined && !planError && <p className="sub">Reading the fee.</p>}
 
       {plan && (
-        <div className="card">
-          <strong>
-            {plan.legs.length} transfer{plan.legs.length === 1 ? "" : "s"}
-          </strong>
-          {plan.legs.map((leg) => (
-            <div key={leg.note.address} className="line">
-              <span className="mono">{leg.note.address.slice(0, 12)}…</span>
-              <span>{usdc(leg.amount)}</span>
-              <span className="dim">
-                {leg.remainder > 0n ? `keeps ${usdc(leg.remainder)}` : "empties"}
-              </span>
-            </div>
-          ))}
-          <p className="sub">
-            The recipient receives {usdc(plan.total)}. The notes pay {usdc(plan.cost)} in fees,
-            so the wallet loses {usdc(plan.total + plan.cost)}.
-          </p>
-        </div>
+        <p className="sub">
+          The recipient receives {usdc(plan.amount)} in one transfer. The gas costs{" "}
+          {usdc(plan.cost)}.
+        </p>
       )}
 
       <button onClick={send} disabled={!plan || !valid || step !== undefined}>
@@ -151,6 +172,24 @@ export default function SendScreen() {
 
       {sent !== undefined && <p className="pass">The recipient received {usdc(sent)}.</p>}
       {error && <p className="fail">{error}</p>}
+
+      {plan && (
+        <details>
+          <summary className="sub">What this uses</summary>
+          <div className="card">
+            {plan.notes.map((note) => (
+              <div key={note.address} className="line">
+                <span className="mono">{note.address.slice(0, 12)}…</span>
+                <span>{usdc(valueOf(note))}</span>
+              </div>
+            ))}
+            <div className="line">
+              <span>Change kept</span>
+              <span className="dim">{usdc(plan.remainder)}</span>
+            </div>
+          </div>
+        </details>
+      )}
 
       <p>
         <Link href="/">Back to the balance</Link>

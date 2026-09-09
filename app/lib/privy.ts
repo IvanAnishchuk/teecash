@@ -75,10 +75,10 @@ const MARGIN_NUMERATOR = 3n;
 const MARGIN_DENOMINATOR = 2n;
 
 /**
- * What one leg costs the note that sends it.
+ * What one transaction costs the wallet that sends it.
  *
- * This is the gas fee plus the base unit that Arc keeps. `selectNotes` needs it to plan a
- * send that delivers an exact amount.
+ * This is the gas fee plus the base unit that Arc keeps. `planSweep` needs it, because a
+ * send makes one transaction for each note and one more for the payment.
  */
 export async function legCost(): Promise<bigint> {
   const fees = await publicClient.estimateFeesPerGas();
@@ -95,22 +95,25 @@ export interface Transfer {
 }
 
 /**
- * Move money from one note.
+ * Move money out of one wallet.
  *
- * The note pays its own fee, because the note is the only account that holds its money.
+ * The wallet pays its own fee, because the wallet is the only account that holds its money.
  * The recipient receives `wanted` and not less.
  *
- * The function sends nothing when the note cannot cover `wanted`, the fee and the base unit
- * that Arc keeps. It throws instead. An earlier version sent the largest amount it could,
- * and a send of several legs then delivered less than the screen showed.
+ * `confirm` decides whether Privy asks the user. A sweep into the new wallet moves money
+ * that stays with the user, so it passes false and Privy signs it without a prompt. The
+ * payment out passes true, because that is the step the user must approve.
+ *
+ * The function sends nothing when the wallet cannot cover `wanted`, the fee and the base
+ * unit that Arc keeps. It throws instead.
  */
-export async function sendFromNote(
+export async function sendFromWallet(
   signTransaction: SignTransaction,
-  note: Note,
+  from: Address,
   to: Address,
   wanted: bigint,
+  confirm: boolean,
 ): Promise<Transfer> {
-  const from = note.address;
   const balance = await publicClient.getBalance({ address: from });
   const fees = await publicClient.estimateFeesPerGas();
   const gas = TRANSFER_GAS;
@@ -119,7 +122,7 @@ export async function sendFromNote(
   const needed = wanted + fee + DUST;
   if (balance < needed) {
     throw new Error(
-      `spend: the note ${from} holds ${balance} and this leg needs ${needed}. ` +
+      `spend: the wallet ${from} holds ${balance} and this step needs ${needed}. ` +
         "The gas price increased after the plan. Try the send again.",
     );
   }
@@ -136,7 +139,7 @@ export async function sendFromNote(
       maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
       chainId: CHAIN_ID,
     },
-    { address: from },
+    { address: from, uiOptions: { showWalletUIs: confirm } },
   );
 
   const hash = await publicClient.sendRawTransaction({

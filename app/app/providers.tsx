@@ -31,7 +31,22 @@ export function Providers({ children }: { children: ReactNode }) {
     <PrivyProvider
       appId={APP_ID}
       config={{
-        embeddedWallets: { ethereum: { createOnLogin: "off" } },
+        embeddedWallets: {
+          ethereum: { createOnLogin: "off" },
+          /**
+           * Privy signs with a note wallet and it does not ask.
+           *
+           * A send empties many notes into one wallet, and a prompt for each note makes a
+           * send of ten notes unusable. Every one of those transactions moves money that
+           * stays with the user. The payment out is the step that leaves the user, and
+           * `sendFromWallet` asks Privy to prompt for that one.
+           *
+           * The screen of this application therefore carries the confirmation. It shows
+           * the amount, the gas and the notes it uses, which is more than the Privy modal
+           * shows for the same transaction.
+           */
+          showWalletUIs: false,
+        },
         defaultChain: chain,
         supportedChains: [chain],
       }}
