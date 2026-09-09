@@ -44,7 +44,6 @@ export interface DepositRecord {
 export interface State {
   chainId?: number;
   blindMint?: Address;
-  consumer?: Address;
   /** The ladder, as decimal base units mapped to a secret scalar. */
   mintKeys: Record<string, Hex>;
   deposits: DepositRecord[];

@@ -22,8 +22,10 @@ import {
   verify,
 } from "@teecash/lib-blind";
 import {
+  concat,
   createWalletClient,
   encodeAbiParameters,
+  encodeDeployData,
   fromHex,
   getContractAddress,
   http,
@@ -37,7 +39,6 @@ import { type Note, type State, findDeposit, load, reset, save, statePath } from
 import { providerOf, walletProvider } from "./wallets.ts";
 
 const blindMintAbi = artifact("BlindMint").abi;
-const consumerAbi = artifact("MintConsumer").abi;
 
 function domainOf(state: State): Domain {
   if (state.chainId === undefined || state.blindMint === undefined) {
@@ -49,6 +50,18 @@ function domainOf(state: State): Domain {
 function keysOf(state: State) {
   return Object.entries(state.mintKeys).map(([denom, sk]) => mintKey(BigInt(denom), BigInt(sk)));
 }
+
+/**
+ * The canonical CREATE2 deployer.
+ *
+ * It answers at the same address on every chain that carries it. A deployment through it
+ * lands on an address that depends on the salt and the init code only. The address is
+ * therefore stable across deployments, and no configuration file has to follow it.
+ */
+const CREATE2_DEPLOYER = "0x4e59b44847b379578588920cA78FbF26c0B4956C" as Address;
+
+/** The salt of every teecash deployment. */
+const SALT = "0x0000000000000000000000000000000000000000000000000000000074656563" as Hex;
 
 export async function deploy(): Promise<void> {
   const { chainId, account, publicClient, walletClient } = await connect();
@@ -69,39 +82,45 @@ export async function deploy(): Promise<void> {
   }
   const keys = keysOf(state);
 
-  // BlindMint takes the consumer as its forwarder. The consumer address comes first.
-  const nonce = await publicClient.getTransactionCount({ address: account.address });
-  const consumerAt = getContractAddress({ from: account.address, nonce: BigInt(nonce) + 1n });
+  // Only the CRE forwarder can deliver a report. A CRE simulation writes through the mock
+  // forwarder of the chain. TEECASH_CRE_FORWARDER carries that address. The deployer takes
+  // the role when the variable is absent. The `mint` command needs that default.
+  const creForwarder = (process.env.TEECASH_CRE_FORWARDER ?? account.address) as Address;
 
-  const mintHash = await walletClient.deployContract({
+  // The init code carries the constructor arguments, so the address covers the forwarder,
+  // the ladder and every public key. The same inputs give the same address on every run
+  // and on every chain. A different mint key set is a different deployment.
+  const initCode = encodeDeployData({
     abi: blindMintAbi,
     bytecode: artifact("BlindMint").bytecode,
-    args: [consumerAt, 3600n, keys.map((k) => k.denom), keys.map((k) => toHex(k.pk))],
+    args: [creForwarder, 3600n, keys.map((k) => k.denom), keys.map((k) => toHex(k.pk))],
   });
-  const mintReceipt = await publicClient.waitForTransactionReceipt({ hash: mintHash });
-  state.blindMint = mintReceipt.contractAddress as Address;
-
-  // Only the CRE forwarder can deliver a report to the consumer. A CRE simulation
-  // writes through the mock forwarder of the chain. TEECASH_CRE_FORWARDER carries that
-  // address. The deployer takes the role when the variable is absent. The `mint`
-  // command needs that default.
-  const creForwarder = (process.env.TEECASH_CRE_FORWARDER ?? account.address) as Address;
-  const consumerHash = await walletClient.deployContract({
-    abi: consumerAbi,
-    bytecode: artifact("MintConsumer").bytecode,
-    args: [creForwarder, state.blindMint],
+  const blindMint = getContractAddress({
+    opcode: "CREATE2",
+    from: CREATE2_DEPLOYER,
+    salt: SALT,
+    bytecode: initCode,
   });
-  const consumerReceipt = await publicClient.waitForTransactionReceipt({ hash: consumerHash });
-  state.consumer = consumerReceipt.contractAddress as Address;
 
-  if (state.consumer.toLowerCase() !== consumerAt.toLowerCase()) {
-    throw new Error("deploy: the consumer did not land on the predicted address");
+  if ((await publicClient.getCode({ address: CREATE2_DEPLOYER })) === undefined) {
+    throw new Error(`deploy: chain ${chainId} carries no CREATE2 deployer at ${CREATE2_DEPLOYER}`);
   }
+
+  // A second deployment of the same inputs would revert. The address already holds the
+  // contract that this run wants, so the run keeps it.
+  const existing = await publicClient.getCode({ address: blindMint });
+  if (existing === undefined) {
+    const hash = await walletClient.sendTransaction({
+      to: CREATE2_DEPLOYER,
+      data: concat([SALT, initCode]),
+    });
+    await publicClient.waitForTransactionReceipt({ hash });
+  }
+  state.blindMint = blindMint;
   save(state);
 
   console.log(`chain      ${chainId}`);
-  console.log(`BlindMint  ${state.blindMint}`);
-  console.log(`consumer   ${state.consumer}`);
+  console.log(`BlindMint  ${blindMint}${existing === undefined ? "" : " (already deployed)"}`);
   console.log(`forwarder  ${creForwarder}`);
   console.log(`ladder     ${LADDER.map((d) => usdc(d)).join(", ")}`);
   console.log(`state      ${statePath}`);
@@ -205,8 +224,8 @@ export async function mint(id?: string): Promise<void> {
   ]);
 
   const hash = await walletClient.writeContract({
-    address: state.consumer as Address,
-    abi: consumerAbi,
+    address: state.blindMint as Address,
+    abi: blindMintAbi,
     functionName: "onReport",
     args: ["0x", report],
     account,
