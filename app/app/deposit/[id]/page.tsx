@@ -18,14 +18,21 @@
  * It claims as soon as it reads the announcement.
  */
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Hex } from "viem";
 import { blindMintAbi } from "../../../lib/abi";
 import { contract, publicClient, usdc } from "../../../lib/chain";
 import { applyAnnouncement, findAnnouncement, relayClaim } from "../../../lib/mint";
-import { claimed, fromAmount, notesOfDeposit, putDepositOnly, putNotes } from "../../../lib/notes";
+import {
+  claimed,
+  discardDeposit,
+  fromAmount,
+  notesOfDeposit,
+  putDepositOnly,
+  putNotes,
+} from "../../../lib/notes";
 import type { Deposit, Note } from "../../../lib/notes";
 import { depositsOf } from "../../../lib/notes";
 import { useVault } from "../../../lib/vault";
@@ -35,11 +42,20 @@ const POLL_MS = 4000;
 
 export default function WaitScreen() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { userId } = useVault();
   const [deposit, setDeposit] = useState<Deposit>();
   const [notes, setNotes] = useState<Note[]>([]);
   const [step, setStep] = useState("Reading the deposit.");
   const [error, setError] = useState<string>();
+  /**
+   * The last network failure.
+   *
+   * This is not `error`. A network that does not answer stops nothing, because the screen
+   * asks again on the next tick. The message therefore goes away as soon as one tick
+   * succeeds. An `error` is a fact about the deposit and it stays.
+   */
+  const [retrying, setRetrying] = useState<string>();
   // One claim run at a time. A second run would send a signature that is already spent.
   const running = useRef(false);
 
@@ -154,8 +170,9 @@ export default function WaitScreen() {
           setStep("Done.");
         }
         await load();
+        setRetrying(undefined);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setRetrying(err instanceof Error ? err.message : String(err));
       } finally {
         running.current = false;
       }
@@ -202,7 +219,26 @@ export default function WaitScreen() {
         ))}
       </div>
 
+      {deposit.txHash === undefined && (
+        <p className="sub">
+          This deposit never reached your wallet, so it holds no money and it cannot
+          continue.{" "}
+          <button
+            className="ghost"
+            onClick={async () => {
+              await discardDeposit(deposit);
+              router.push("/");
+            }}
+          >
+            Discard it
+          </button>
+        </p>
+      )}
+
       {error && <p className="fail">{error}</p>}
+      {retrying && !done && (
+        <p className="sub">The node did not answer. This screen asks again every few seconds.</p>
+      )}
 
       {done && <Link href="/">Back to the balance</Link>}
     </main>

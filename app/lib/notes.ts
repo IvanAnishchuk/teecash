@@ -179,6 +179,34 @@ export async function putDeposit(deposit: Deposit, notes: Note[]): Promise<void>
   }
 }
 
+/**
+ * Remove one deposit and every note of it.
+ *
+ * Only a deposit that never reached a wallet is safe to remove. Such a deposit holds no
+ * money, because no transaction exists. A deposit with a transaction hash keeps the only
+ * copy of the blinding factors, and those factors are the only way to claim the notes.
+ */
+export async function discardDeposit(deposit: Deposit): Promise<void> {
+  if (deposit.txHash !== undefined) {
+    throw new Error("notes: this deposit reached the chain and the client must keep it");
+  }
+  const notes = await notesOfDeposit(deposit.id);
+  const db = await open();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([DEPOSITS, NOTES], "readwrite");
+      tx.objectStore(DEPOSITS).delete(deposit.id);
+      const store = tx.objectStore(NOTES);
+      for (const note of notes) store.delete(note.address);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
 export function notesOf(userId: string): Promise<Note[]> {
   return run([NOTES], "readonly", (tx) =>
     tx.objectStore(NOTES).index("userId").getAll(userId),
