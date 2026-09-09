@@ -20,6 +20,7 @@ import { useEffect, useState } from "react";
 import { isAddress, parseUnits } from "viem";
 import type { Address } from "viem";
 import { usdc } from "../../lib/chain";
+import { explain } from "../../lib/errors";
 import { putNotes } from "../../lib/notes";
 import { legCost, sendFromNote } from "../../lib/privy";
 import { InsufficientFunds, selectNotes } from "../../lib/spend";
@@ -57,9 +58,7 @@ export default function SendScreen() {
       err instanceof InsufficientFunds
         ? `The notes can send ${usdc(err.available)} and the send needs ${usdc(err.wanted)}. ` +
           "The difference is the fee that each note pays."
-        : err instanceof Error
-          ? err.message
-          : String(err);
+        : explain(err, "That amount does not work. Check it and try again.");
   }
 
   const valid = isAddress(to);
@@ -89,7 +88,7 @@ export default function SendScreen() {
       await reload();
     } catch (err) {
       setStep(undefined);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(explain(err, "The send stopped. Read the notes below for what moved."));
       await reload();
     }
   }

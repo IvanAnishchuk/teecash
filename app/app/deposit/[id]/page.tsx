@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Hex } from "viem";
 import { blindMintAbi } from "../../../lib/abi";
+import { explain } from "../../../lib/errors";
 import { contract, publicClient, usdc } from "../../../lib/chain";
 import { applyAnnouncement, findAnnouncement, relayClaim } from "../../../lib/mint";
 import {
@@ -87,7 +88,7 @@ export default function WaitScreen() {
         await relayClaim(note);
         await putNotes([claimed(note)]);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(explain(err, "The claim did not go through. This screen tries again."));
       }
       await load();
     }
@@ -172,7 +173,7 @@ export default function WaitScreen() {
         await load();
         setRetrying(undefined);
       } catch (err) {
-        setRetrying(err instanceof Error ? err.message : String(err));
+        setRetrying(explain(err, "The node did not answer."));
       } finally {
         running.current = false;
       }

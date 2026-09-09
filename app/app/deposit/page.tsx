@@ -21,6 +21,7 @@ import { createWalletClient, custom, parseUnits } from "viem";
 import type { Address } from "viem";
 import { LADDER, pointCount, splitGreedy } from "@teecash/lib-blind";
 import { blindMintAbi } from "../../lib/abi";
+import { explain } from "../../lib/errors";
 import { CHAIN_ID, chain, contract, publicClient, usdc } from "../../lib/chain";
 import { blindWallets } from "../../lib/mint";
 import { putDeposit, putDepositOnly, toAmount } from "../../lib/notes";
@@ -124,7 +125,7 @@ export default function DepositScreen() {
       router.push(`/deposit/${depositId}`);
     } catch (err) {
       setStep(undefined);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(explain(err, "The deposit did not start. Try again."));
     }
   }
 
