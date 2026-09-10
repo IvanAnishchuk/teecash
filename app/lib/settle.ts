@@ -25,12 +25,17 @@ import {
   onChainDeposit,
   relayClaim,
 } from "./mint";
-import { claimed, notesOfDeposit, putDepositOnly, putNotes } from "./notes";
+import { claimed, discardDeposit, notesOfDeposit, putDepositOnly, putNotes } from "./notes";
 import type { Deposit, Note } from "./notes";
 
 /** Report whether a note needs nothing more. */
 export function settled(note: Note): boolean {
-  return note.status === "claimed" || note.status === "unused" || note.status === "spent";
+  return (
+    note.status === "claimed" ||
+    note.status === "unused" ||
+    note.status === "spent" ||
+    note.status === "dust"
+  );
 }
 
 /**
@@ -88,7 +93,18 @@ async function claimAll(ready: Note[]): Promise<void> {
  */
 export async function settleDeposit(deposit: Deposit): Promise<void> {
   // A deposit without a hash never reached a wallet, so it has no receipt to read.
-  if (deposit.txHash === undefined) return;
+  //
+  // A melt writes its record before it sends, and the send can still fail. A melt that
+  // carries no point leaves such a record behind, and nothing can ever move it. The balance
+  // screen counts it as money on the way, so a queue of them reads as a wallet full of
+  // pending deposits of nothing. It holds no note and no blinding factor, so it goes.
+  //
+  // A record that carries points stays. A send whose answer was lost can still mine, and
+  // the blinding factors of those notes exist in this browser and nowhere else.
+  if (deposit.txHash === undefined) {
+    if ((await notesOfDeposit(deposit.id)).length === 0) await discardDeposit(deposit);
+    return;
+  }
 
   // A record from a build before the `contract` field cannot say which deployment numbers
   // it. Reading any other deployment under that number reads a stranger, so this stops
@@ -147,6 +163,20 @@ export async function settleDeposit(deposit: Deposit): Promise<void> {
   }
 
   const stored = await notesOfDeposit(deposit.id);
+
+  // A melt of a wallet below two rungs mints nothing, so it carries no point and this
+  // record holds no note. The whole deposit becomes mint tax.
+  //
+  // The test at the end of this function needs a note, so it can never finish such a
+  // deposit. Without this branch the record stays `pending` for ever and the balance screen
+  // counts a gift to the treasury as money on the way. The chain has to say `announced`
+  // first, because until then the mint may still answer.
+  if (stored.length === 0) {
+    if (chain.status === "announced") {
+      await putDepositOnly({ ...deposit, status: "claimed" });
+    }
+    return;
+  }
 
   // Notes that already hold a signature are claimed first. A reload in the middle of a
   // claim run leaves them, and they must not wait for another announcement.

@@ -46,8 +46,12 @@ const SPARE = "spare";
  * `unused` the announcement left this point out, so the mint never signed it. A deposit
  * carries more points than the split needs, and this is the state of the rest. The note
  * holds no value and it never will.
+ * `dust` the wallet holds less than a melt costs, so the settler stops. The change wallet
+ * of a send reaches this state when the gas takes more than the change. The money is not
+ * lost, but no melt can move it, and a settler that tries again every pass asks the node
+ * about the same dead wallet for as long as the application stays open.
  */
-export type NoteStatus = "awaiting-mint" | "ready" | "claimed" | "spent" | "unused";
+export type NoteStatus = "awaiting-mint" | "ready" | "claimed" | "spent" | "unused" | "dust";
 
 /**
  * The state of one deposit.
