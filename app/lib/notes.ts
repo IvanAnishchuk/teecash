@@ -22,7 +22,16 @@
 import type { Address, Hex } from "viem";
 
 const DB_NAME = "teecash";
-const DB_VERSION = 2;
+/**
+ * The schema version.
+ *
+ * Raise it for every store or index that this file adds, and add the store inside
+ * `onupgradeneeded` in the same change. A browser that opens the database at a version runs
+ * the upgrade one time only. A build that raises the version without adding the store
+ * therefore leaves a database that no later build can repair, because the version already
+ * matches. Version 3 exists for that reason.
+ */
+const DB_VERSION = 3;
 const NOTES = "notes";
 const DEPOSITS = "deposits";
 const SPARE = "spare";
@@ -153,6 +162,10 @@ function open(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+    // Another tab holds the database at the older version, so the upgrade cannot start.
+    // Without this the call waits for that tab and says nothing.
+    request.onblocked = () =>
+      reject(new Error("notes: another tab holds this database. Close it and try again."));
   });
 }
 
