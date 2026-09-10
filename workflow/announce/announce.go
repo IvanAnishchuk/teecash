@@ -86,9 +86,13 @@ func DecodeDeposit(topics [][]byte, data []byte) (*Deposit, error) {
 	if !ok {
 		return nil, fmt.Errorf("announce: the blinded points have the wrong type")
 	}
-	if len(points) == 0 {
-		return nil, fmt.Errorf("announce: the deposit holds no points")
-	}
+	// A deposit of no points is legal. A wallet below two rungs mints nothing, so it sends
+	// an empty list and the whole amount becomes tax. `Mint.Split` answers no split for it
+	// and the announcement then carries no note.
+	//
+	// An earlier version refused the empty list here. The refusal ran before the split, so
+	// the mint stopped on every melt of dust, and it stopped inside the enclave where a log
+	// is forbidden. The deposit stayed pending with nothing anywhere to say why.
 	return &Deposit{ID: new(big.Int).SetBytes(topics[1]), Amount: amount, BlindedPoints: points}, nil
 }
 
