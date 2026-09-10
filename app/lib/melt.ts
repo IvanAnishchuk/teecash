@@ -29,7 +29,7 @@ import type { Hex, TransactionSerialized } from "viem";
 import { blindMintAbi } from "./abi";
 import { CHAIN_ID, contract, publicClient } from "./chain";
 import { blindWallets } from "./mint";
-import { discardDeposit, putDeposit, putDepositOnly, putNotes, toAmount } from "./notes";
+import { discardDeposit, putDeposit, putDepositOnly, putNotes, putSpare, toAmount } from "./notes";
 import type { Note } from "./notes";
 import { DUST, createNoteWallets, walletUiOptions } from "./privy";
 
@@ -90,7 +90,7 @@ export async function meltWallet(
     // The record holds what the deposit mints. The tax leaves the contract when the mint
     // announces. Every balance on the screens reads this field.
     const minted = toAmount(mintable(guess));
-    const wallets = await createNoteWallets(createWallet, existingEmbedded + pass, points);
+    const wallets = await createNoteWallets(createWallet, existingEmbedded + pass, points, userId);
     const depositId = crypto.randomUUID();
     const draft = blindWallets(wallets, userId, depositId);
     const blinded = draft.map((note) => note.blinded);
@@ -104,7 +104,12 @@ export async function meltWallet(
       value: guess,
     });
     const cost = gas * fees.maxFeePerGas;
-    if (balance < guess + cost + DUST) continue;
+    // The next pass asks for a lower amount and takes its own wallets. These carried no
+    // point to the chain, so they go back to the pool instead of ending here.
+    if (balance < guess + cost + DUST) {
+      await putSpare(wallets.map((w) => ({ ...w, userId })));
+      continue;
+    }
 
     const record = {
       id: depositId,

@@ -251,6 +251,30 @@ func TestSplitSumsToTheMintablePart(t *testing.T) {
 	}
 }
 
+// The client sends exactly the points that its own greedy split counts, because SLACK in
+// lib-blind is zero. The mint must therefore never need one more than that count. A mint
+// that chooses another split breaks this test before it strands a deposit.
+func TestSplitNeedsNoPointBeyondItsOwnCount(t *testing.T) {
+	m := newMint(t, load(t))
+	usdc := oneUsdc()
+
+	for _, net := range []int64{1, 23, 100, 111} {
+		amount := grossFor(m, new(big.Int).Mul(big.NewInt(net), usdc))
+		want, err := m.Split(amount, 256)
+		if err != nil {
+			t.Fatalf("Split(%d): %v", net, err)
+		}
+		got, err := m.Split(amount, len(want))
+		if err != nil {
+			t.Errorf("Split(%d) needs more than the %d points it counts: %v", net, len(want), err)
+			continue
+		}
+		if len(got) != len(want) {
+			t.Errorf("Split(%d): got %d notes with an exact cap, want %d", net, len(got), len(want))
+		}
+	}
+}
+
 func TestSplitRejectsTooFewPoints(t *testing.T) {
 	m := newMint(t, load(t))
 	net := new(big.Int).Mul(big.NewInt(23), oneUsdc())

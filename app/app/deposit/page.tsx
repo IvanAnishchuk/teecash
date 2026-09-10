@@ -97,7 +97,7 @@ export default function DepositScreen() {
     let draftRecord: Deposit | undefined;
     try {
       setStep(`Making ${points} wallets.`);
-      const made = await createNoteWallets(createWallet, embedded.length, points);
+      const made = await createNoteWallets(createWallet, embedded.length, points, userId);
 
       // The blinding factor of a note exists only here. The contract pays a note against a
       // signature that the client unblinds with that factor, and nothing on the chain holds

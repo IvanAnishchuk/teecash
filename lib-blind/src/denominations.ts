@@ -95,8 +95,21 @@ export function grossFor(net: bigint): bigint {
   return net + MIN_DENOM;
 }
 
-/** Extra blinded points in each deposit. Calldata is cheap. A short deposit is not cheap. */
-export const SLACK = 4;
+/**
+ * Extra blinded points in each deposit.
+ *
+ * The count is zero. The client and the mint run the same greedy split over the same
+ * ladder, so the mint takes exactly the points that `splitGreedy` counts. Every extra point
+ * was a point that the mint never signed.
+ *
+ * A point is one wallet, and the wallet provider counts at most 150 for one user and
+ * returns none of them. Four extra points on each deposit therefore ended an account after
+ * 37 deposits, whatever the money did.
+ *
+ * A later mint that chooses another split needs this count above zero again. The test that
+ * compares `pointCount` against the split of the Go mint is what catches that.
+ */
+export const SLACK = 0;
 
 /**
  * Count the blinded points to put in a deposit.

@@ -89,7 +89,7 @@ export default function SendScreen() {
       // money stays with the user until the payment.
       setStep("Preparing.");
       const embedded = wallets.filter((w) => w.connectorType === "embedded");
-      const [pocket] = await createNoteWallets(createWallet, embedded.length, 1);
+      const [pocket] = await createNoteWallets(createWallet, embedded.length, 1, userId);
 
       // Each note goes whole and each sweep pays one share of the gas. A note that gave
       // everything is spent. The record changes as each sweep lands, so a failure in the

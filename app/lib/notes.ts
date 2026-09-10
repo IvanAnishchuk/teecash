@@ -22,9 +22,10 @@
 import type { Address, Hex } from "viem";
 
 const DB_NAME = "teecash";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const NOTES = "notes";
 const DEPOSITS = "deposits";
+const SPARE = "spare";
 
 /**
  * The state of one note.
@@ -145,6 +146,10 @@ function open(): Promise<IDBDatabase> {
         const deposits = db.createObjectStore(DEPOSITS, { keyPath: "id" });
         deposits.createIndex("userId", "userId");
       }
+      if (!db.objectStoreNames.contains(SPARE)) {
+        const spare = db.createObjectStore(SPARE, { keyPath: "address" });
+        spare.createIndex("userId", "userId");
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -221,10 +226,17 @@ export async function discardDeposit(deposit: Deposit): Promise<void> {
   const db = await open();
   try {
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([DEPOSITS, NOTES], "readwrite");
+      const tx = db.transaction([DEPOSITS, NOTES, SPARE], "readwrite");
       tx.objectStore(DEPOSITS).delete(deposit.id);
       const store = tx.objectStore(NOTES);
-      for (const note of notes) store.delete(note.address);
+      // The wallets of this deposit go to the spare pool. The check above proves that no
+      // transaction carried their blinded points, so the chain never saw them and no mint
+      // can ever sign them. A later deposit can therefore blind them again.
+      const spare = tx.objectStore(SPARE);
+      for (const note of notes) {
+        store.delete(note.address);
+        spare.put({ address: note.address, walletId: note.walletId, userId: note.userId });
+      }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
@@ -232,6 +244,75 @@ export async function discardDeposit(deposit: Deposit): Promise<void> {
   } finally {
     db.close();
   }
+}
+
+/**
+ * One wallet that no deposit uses.
+ *
+ * The wallet provider counts at most 150 wallets for one user and returns none of them, so
+ * a wallet that a deposit made and then abandoned is worth keeping.
+ *
+ * Every wallet here comes from a deposit that never reached the chain. Its blinded point
+ * was never published, so no mint holds a signature over it. A wallet whose point did reach
+ * the chain never enters this pool, because `discardDeposit` refuses such a deposit.
+ */
+export interface Spare {
+  address: Address;
+  walletId: string;
+  userId: string;
+}
+
+/** Add wallets that no deposit used to the spare pool. */
+export async function putSpare(spares: Spare[]): Promise<void> {
+  if (spares.length === 0) return;
+  const db = await open();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction([SPARE], "readwrite");
+      const store = tx.objectStore(SPARE);
+      for (const spare of spares) store.put(spare);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Take up to `count` wallets from the spare pool.
+ *
+ * The wallets leave the pool in the same transaction that reads them, so two callers never
+ * receive one wallet. A caller that then fails puts them back.
+ */
+export async function takeSpare(userId: string, count: number): Promise<Spare[]> {
+  if (count <= 0) return [];
+  const db = await open();
+  try {
+    return await new Promise<Spare[]>((resolve, reject) => {
+      const tx = db.transaction([SPARE], "readwrite");
+      const store = tx.objectStore(SPARE);
+      const request = store.index("userId").getAll(userId, count);
+      let taken: Spare[] = [];
+      request.onsuccess = () => {
+        taken = request.result as Spare[];
+        for (const spare of taken) store.delete(spare.address);
+      };
+      tx.oncomplete = () => resolve(taken);
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/** Count the wallets that the spare pool holds. */
+export function spareCount(userId: string): Promise<number> {
+  return run([SPARE], "readonly", (tx) =>
+    tx.objectStore(SPARE).index("userId").count(userId),
+  ) as Promise<number>;
 }
 
 export function notesOf(userId: string): Promise<Note[]> {

@@ -11,6 +11,7 @@
 import type { useCreateWallet, usePrivy, useSignTransaction } from "@privy-io/react-auth";
 import type { Address, Hex, TransactionSerialized } from "viem";
 import { CHAIN_ID, publicClient } from "./chain";
+import { takeSpare } from "./notes";
 import type { Note } from "./notes";
 
 // These come from Privy and not from a copy here. A copy would go out of date without a
@@ -33,12 +34,16 @@ export interface NewWallet {
 }
 
 /**
- * Make `count` embedded wallets for the signed in user.
+ * Take `count` embedded wallets for the signed in user.
  *
- * `createAdditional` decides whether Privy makes a new wallet or returns the one that
- * exists. There is a rule on the first wallet of a user. Privy throws when the flag is
- * true and the user holds no Ethereum embedded wallet. The flag is therefore false for
- * that first wallet only.
+ * The spare pool answers first. Privy counts at most 150 wallets for one user and returns
+ * none of them, so a wallet that an abandoned deposit made is worth more than a new one.
+ * `notes.ts` says which wallets reach that pool and why they are safe.
+ *
+ * Privy makes the rest. `createAdditional` decides whether Privy makes a new wallet or
+ * returns the one that exists. There is a rule on the first wallet of a user. Privy throws
+ * when the flag is true and the user holds no Ethereum embedded wallet. The flag is
+ * therefore false for that first wallet only.
  *
  * `existing` is how many embedded wallets the user already holds.
  */
@@ -46,9 +51,16 @@ export async function createNoteWallets(
   createWallet: CreateWallet,
   existing: number,
   count: number,
+  userId?: string,
 ): Promise<NewWallet[]> {
-  const made: NewWallet[] = [];
-  for (let i = 0; i < count; i++) {
+  const made: NewWallet[] = userId
+    ? (await takeSpare(userId, count)).map((spare) => ({
+        address: spare.address,
+        walletId: spare.walletId,
+      }))
+    : [];
+
+  for (let i = made.length; i < count; i++) {
     const first = existing === 0 && i === 0;
     const wallet = await createWallet(first ? {} : { createAdditional: true });
     made.push({ address: wallet.address as Address, walletId: wallet.id ?? wallet.address });
