@@ -121,21 +121,42 @@ client held `r`, and the client has discarded it.
 
 The client blinds an address and nothing else. No denomination enters the signed message.
 The denomination comes only from the key that signs. The client cannot choose the split.
-The mint picks any assignment whose denominations sum to the deposit.
+The mint picks any assignment whose denominations sum to the mintable part of the
+deposit.
 
 - `N` is a cap and not a prediction. The client sends the smallest split plus slack. The
   mint may use fewer points and leave the rest unsigned.
 - The client reads the assignment from the `announce` event. The deposit amount is
   already public, so this reveals nothing further.
 - `announce` publishes the denominations. The contract therefore enforces
-  `sum(denoms) == X`. It also checks that every point index is distinct and in range.
-  Blinding hides the address that a signature is for. It does not hide the key that
-  signed.
+  `sum(denoms) == mintable(X)`. It also checks that every point index is distinct and in
+  range. Blinding hides the address that a signature is for. It does not hide the key
+  that signed.
 - `claim` verifies a pairing. It cannot check whether a signature was ever announced,
   because that check needs the link that blinding destroys. A mint that signs off band
   can therefore issue notes beyond the pool. The contract bounds the damage with
   `totalClaimed <= totalAnnounced`. The mint key stays inside the enclave, where
   operators cannot reach it.
+
+## The mint tax
+
+A deposit of `X` mints `mintable(X)` and the contract keeps the rest.
+
+    mintable(X) = X < rung ? 0 : (X / rung - 1) * rung
+
+`rung` is the smallest denomination, one cent. The tax is therefore one cent plus every
+base unit below the cent. The tax goes to the treasury at the announcement. It pays for
+the mint transaction and the claim transaction.
+
+- **The tax is extra.** It is not part of the amount that a user asks for. A client that
+  wants three USDC of notes sends 3.01. A client that subtracted the cent from a round
+  amount would make the greedy split use every rung of the ladder. A split of 2.99 holds
+  twenty notes. A split of 3.00 holds three.
+- **Any amount is a legal deposit.** A deposit below two cents mints nothing. The
+  announcement carries no note and the treasury takes all of it. A melt uses this. It
+  deposits the whole change wallet and the remainder below the cent becomes tax. An
+  earlier melt left that remainder in the wallet, where it marked the money.
+- **A refund returns the whole deposit.** The mint signed nothing, so it takes no tax.
 
 ## Layout
 
@@ -156,45 +177,80 @@ generates `lib-blind/vectors.json`. The Solidity tests and the Go tests both rea
 
 ## Run it
 
-Local, against an anvil that emulates Arc:
+`just` runs every task. `just` alone lists them.
+
+The chain belongs to a profile file and never to a command line. `TEECASH_ENV` names the
+profile. The default is `local`, because a mistake against a local anvil costs nothing.
 
 ```bash
-anvil --chain-id 5042002 --hardfork osaka --base-fee 0 --gas-price 0
+cp .env.local.example .env.local
+cp .env.arc.example .env.arc
+cp cli/example.env cli/.env             # set TEECASH_DEPLOYER_KEY
+cp workflow/.env.example workflow/.env  # set the mint keys
+cp app/example.env app/.env.local       # `just app-env` rewrites this file
 
-cd contracts && forge build
-cd ../lib-blind && npm install && npm run vectors && npm test
-cd ../cli && npm install
-npm run teecash -- demo 3
+just which                              # the profile, the chain and the deployment
 ```
 
-Use the same chain ID. `BlindMint` builds its domain tag from `block.chainid`. A different
-chain ID gives a different tag, and every signature then fails.
-
-Against Arc testnet, with the CRE mint doing the signing:
+### One local run
 
 ```bash
-cp cli/example.env cli/.env            # set TEECASH_DEPLOYER_KEY
-cp workflow/.env.example workflow/.env # set the mint keys
+just anvil                              # one terminal, and it stays
+just demo 3
+```
 
-export TEECASH_RPC=https://rpc.testnet.arc.io
-export TEECASH_CRE_FORWARDER=0x6E9EE680ef59ef64Aa8C7371279c27E496b5eDc1
+The chain ID must be 5042002. `BlindMint` builds its domain tag from `block.chainid`. A
+different chain ID gives a different tag, and every signature then fails.
 
-cd cli
-npm run teecash -- deploy
-# Put the address that `deploy` printed into workflow/blindmint/config.production.json.
-# The address is stable, so this is a one-time step.
-#
-# Then run the mint as a service. It fires on every deposit and it re-arms:
-cd ../workflow
-cre workflow simulate ./blindmint --target production-settings -e .env \
-  --trigger-index 0 --listen --broadcast
+### Arc testnet, with the CRE mint
 
-cd ../cli
-npm run teecash -- deposit 3
-npm run teecash -- sync
-npm run teecash -- claim
-npm run teecash -- spend
-npm run teecash -- sweep
+```bash
+export TEECASH_ENV=arc
+
+just deploy
+# `deploy` prints the address. Put it in workflow/blindmint/config.production.json.
+# The trigger reads that file, and a log from another address does not match its filter.
+
+just mint                               # one terminal, and it stays
+just deposit 3
+just sync
+just claim
+just spend
+just sweep                              # always, at the end of an Arc run
+```
+
+`mint` passes `--broadcast`. The default of that flag is false, and the simulation
+then signs a report that it never writes. The enclave reports success and the chain shows
+no announcement, so the deposit stays pending.
+
+### The browser app
+
+The app needs the mint and the relayer. Each one is a terminal of its own. `just app-help`
+prints the list.
+
+```bash
+export TEECASH_ENV=arc
+
+just deploy                             # exits
+just app-env                            # exits. Writes app/.env.local
+just mint                               # stays
+just relayer                            # stays
+just app                                # stays. http://localhost:3000
+```
+
+`app-env` writes `app/.env.local` from the profile and the state file. Do this after each
+deploy. A deploy changes the address, because the CREATE2 address covers every constructor
+argument. Every value in that file reaches the browser bundle, and none of them is a
+secret.
+
+`just relayer-health` reports whether the relayer answers.
+
+### Reading the tax
+
+```bash
+just tax-config                         # the rung, the treasury and two mintable answers
+just tax-events <from-block>            # every Taxed event. Arc removes old history
+just totals                             # totalAnnounced, totalClaimed and the balance
 ```
 
 ## Notes on Arc
