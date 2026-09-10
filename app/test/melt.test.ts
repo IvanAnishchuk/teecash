@@ -10,7 +10,7 @@
 import { MIN_DENOM, mintable } from "@teecash/lib-blind";
 import { describe, expect, it } from "vitest";
 import { DUST } from "../lib/privy";
-import { meltable } from "../lib/melt";
+import { depositGas, gasLimitFor, meltable } from "../lib/melt";
 
 const USDC = 10n ** 18n;
 
@@ -49,5 +49,33 @@ describe("meltable", () => {
     const balance = MIN_DENOM / 2n + DUST;
     expect(meltable(balance, 0n)).toBe(MIN_DENOM / 2n);
     expect(mintable(meltable(balance, 0n))).toBe(0n);
+  });
+});
+
+describe("gasLimitFor", () => {
+  it("holds a quarter above the estimate", () => {
+    expect(gasLimitFor(100_000n)).toBe(125_000n);
+    expect(gasLimitFor(0n)).toBe(0n);
+  });
+
+  /**
+   * A node holds the funds of the declared limit. A reserve of the bare estimate is short
+   * by the pad, and the node then refuses the melt for that difference. An earlier melt
+   * reserved `depositGas(points)` and declared a quarter more, and every dust melt failed.
+   */
+  it("covers the limit that the melt declares", () => {
+    const price = 21n * 10n ** 9n;
+    const balance = 5n * MIN_DENOM;
+    for (const points of [0, 1, 3, 7, 20]) {
+      // `depositGas` is the first guess and it rounds up, so the real estimate sits at or
+      // below it. The melt declares a quarter above whichever figure the node returns.
+      const first = depositGas(points);
+      const reserve = price * gasLimitFor(first);
+      const guess = meltable(balance, reserve);
+      for (const estimate of [first, (first * 3n) / 4n, first / 2n]) {
+        const demand = price * gasLimitFor(estimate);
+        expect(guess + demand + DUST).toBeLessThanOrEqual(balance);
+      }
+    }
   });
 });

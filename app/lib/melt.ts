@@ -75,6 +75,20 @@ export function depositGas(points: number): bigint {
 }
 
 /**
+ * The gas limit that a deposit declares.
+ *
+ * The limit carries a quarter more than the estimate. A deposit that costs more than the
+ * estimate then still completes.
+ *
+ * A node holds the funds of the declared limit and not the funds of the estimate. Every
+ * reserve must therefore pad the same way. An earlier melt reserved the estimate and
+ * declared the limit, and the node refused every melt for the difference.
+ */
+export function gasLimitFor(gas: bigint): bigint {
+  return gas + gas / 4n;
+}
+
+/**
  * Deposit the change of one wallet back into the contract.
  *
  * The function returns the local name of the new deposit. It returns undefined when the
@@ -104,7 +118,7 @@ export async function meltWallet(
     // The count comes from the whole balance, which is at or above the amount that this
     // pass sends. The reserve is therefore never short. `estimateContractGas` below reads
     // the real figure, and the pass after this one lowers the amount when it disagrees.
-    const reserve = fees.maxFeePerGas * depositGas(pointCount(balance - DUST));
+    const reserve = fees.maxFeePerGas * gasLimitFor(depositGas(pointCount(balance - DUST)));
     const guess = meltable(balance, reserve) - BigInt(pass) * MIN_DENOM;
     if (guess <= 0n) return undefined;
 
@@ -125,7 +139,8 @@ export async function meltWallet(
       args: [blinded],
       value: guess,
     });
-    const cost = gas * fees.maxFeePerGas;
+    const limit = gasLimitFor(gas);
+    const cost = limit * fees.maxFeePerGas;
     // The next pass asks for a lower amount and takes its own wallets. These carried no
     // point to the chain, so they go back to the pool instead of ending here.
     if (balance < guess + cost + DUST) {
@@ -166,7 +181,7 @@ export async function meltWallet(
           value: guess,
           data: encodeDeposit(blinded),
           nonce,
-          gasLimit: gas + gas / 4n,
+          gasLimit: limit,
           maxFeePerGas: fees.maxFeePerGas,
           maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
           chainId: CHAIN_ID,
