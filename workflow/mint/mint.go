@@ -129,12 +129,14 @@ func (m *Mint) Split(amount *big.Int, maxPoints int) ([]*big.Int, error) {
 	if amount == nil || amount.Sign() <= 0 {
 		return nil, errors.New("mint: the amount must be more than zero")
 	}
-	if maxPoints <= 0 {
-		return nil, errors.New("mint: the deposit holds no points")
-	}
+	// A deposit that mints nothing carries no point, and it needs none. The check for a
+	// deposit with no point therefore comes after this one.
 	rest := m.Mintable(amount)
 	if rest.Sign() == 0 {
 		return nil, nil
+	}
+	if maxPoints <= 0 {
+		return nil, errors.New("mint: the deposit holds no points")
 	}
 	var out []*big.Int
 	for _, d := range m.ladder {

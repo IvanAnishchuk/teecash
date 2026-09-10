@@ -105,12 +105,15 @@ export const SLACK = 4;
  * ceiling on the split. The count is the smallest possible note count plus `SLACK`.
  *
  * `amount` is the value of the deposit and not the value that it mints. The tax is
- * removed first. A deposit that mints nothing still carries `SLACK` points, because the
- * contract refuses a deposit that carries none.
+ * removed first.
+ *
+ * A deposit that mints nothing takes no point at all. The mint signs none of them, so a
+ * point would only cost a wallet. A melt of dust uses that deposit, and the wallet
+ * provider counts every wallet it ever gave.
  */
 export function pointCount(amount: bigint): number {
   const net = mintable(amount);
-  return (net === 0n ? 0 : splitGreedy(net).length) + SLACK;
+  return net === 0n ? 0 : splitGreedy(net).length + SLACK;
 }
 
 /**

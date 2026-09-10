@@ -15,6 +15,11 @@
  * rung and the remainder below the rung as the mint tax. It mints the rest. A change
  * wallet that holds less than two rungs still empties, and all of it becomes tax. Only
  * the gas and one base unit of dust remain.
+ *
+ * A melt that mints nothing carries no point, so it costs no wallet. `pointCount` answers
+ * zero for it and the contract accepts a deposit of no points. That melt is a gift of dust
+ * to the treasury, and it is the cheapest way to empty a wallet that holds a value on no
+ * rung.
  */
 
 import { MIN_DENOM, mintable, pointCount } from "@teecash/lib-blind";
@@ -79,17 +84,7 @@ export async function meltWallet(
   for (let pass = 0; pass < PASSES; pass++) {
     // Start from a generous reserve and lower the amount when the estimate disagrees.
     const guess = meltable(balance, fees.maxFeePerGas * 400000n) - BigInt(pass) * MIN_DENOM;
-    // The melt stops when the deposit would mint nothing.
-    //
-    // The contract accepts such a deposit and the treasury takes all of it, so the chain is
-    // not the reason to stop. The wallets are. Every deposit carries `SLACK` points, and a
-    // point is one embedded wallet from a provider that counts at most 150 for one user and
-    // gives none of them back. Four wallets to hand a fraction of a cent to the treasury is
-    // a bad trade, and the settler would repeat it on every pass.
-    //
-    // The dust therefore stays in the change wallet. It is below one cent and it marks
-    // nothing that a cent would not mark.
-    if (guess <= 0n || mintable(guess) === 0n) return undefined;
+    if (guess <= 0n) return undefined;
 
     const points = pointCount(guess);
     // The record holds what the deposit mints. The tax leaves the contract when the mint

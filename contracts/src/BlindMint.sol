@@ -155,11 +155,15 @@ contract BlindMint is IReceiver {
      * @notice Lock value against a list of blinded points.
      * @dev Send more points than the smallest split needs. The mint can only sign points
      *      that this deposit holds. The count is therefore the ceiling on the split.
+     *
+     *      A deposit that mints nothing takes no point. The mint signs none of them, so a
+     *      point would only cost the depositor a wallet. Such a deposit gives all of its
+     *      value to the treasury, and a melt uses it to empty a wallet of dust.
      * @param blindedPoints The blinded G2 points, 256 bytes each.
      * @return id The deposit identifier.
      */
     function deposit(bytes[] calldata blindedPoints) external payable returns (uint256 id) {
-        if (blindedPoints.length == 0) revert NoPoints();
+        if (blindedPoints.length == 0 && mintable(msg.value) != 0) revert NoPoints();
         if (blindedPoints.length > MAX_POINTS) revert TooManyPoints(blindedPoints.length, MAX_POINTS);
         if (msg.value == 0) revert NoValue();
         if (msg.value > type(uint96).max) revert AmountTooLarge();

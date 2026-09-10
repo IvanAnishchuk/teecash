@@ -264,12 +264,15 @@ func TestSplitRejectsTooFewPoints(t *testing.T) {
 func TestSplitReturnsNothingForADepositThatMintsNothing(t *testing.T) {
 	m := newMint(t, load(t))
 	for _, amount := range []*big.Int{big.NewInt(1), big.NewInt(1_500_000), m.Rung()} {
-		got, err := m.Split(amount, 8)
-		if err != nil {
-			t.Fatalf("Split(%s): %v", amount, err)
-		}
-		if len(got) != 0 {
-			t.Errorf("Split(%s): got %d notes, want none", amount, len(got))
+		// Zero points as well. Such a deposit carries none, because the mint signs none.
+		for _, maxPoints := range []int{0, 8} {
+			got, err := m.Split(amount, maxPoints)
+			if err != nil {
+				t.Fatalf("Split(%s, %d): %v", amount, maxPoints, err)
+			}
+			if len(got) != 0 {
+				t.Errorf("Split(%s, %d): got %d notes, want none", amount, maxPoints, len(got))
+			}
 		}
 	}
 }

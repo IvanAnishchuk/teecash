@@ -270,6 +270,30 @@ contract BlindMintTest is Test {
         assertEq(mint.mintable(0), 0);
     }
 
+    /// @dev A melt of dust uses this. A point would only cost the depositor a wallet.
+    function test_deposit_acceptsNoPointsWhenItMintsNothing() public {
+        bytes[] memory none = new bytes[](0);
+        vm.prank(depositor);
+        uint256 id = mint.deposit{value: rung - 1}(none);
+
+        (, uint96 amount, uint32 points,, BlindMint.Status status) = mint.deposits(id);
+        assertEq(amount, rung - 1);
+        assertEq(points, 0);
+        assertTrue(status == BlindMint.Status.Pending, "the deposit is not pending");
+
+        (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) = _empty();
+        vm.prank(forwarder);
+        mint.announce(id, idx, denoms, sigs);
+        assertEq(treasury.balance, rung - 1, "the treasury did not take the deposit");
+    }
+
+    function test_deposit_rejectsNoPointsWhenItMints() public {
+        bytes[] memory none = new bytes[](0);
+        vm.prank(depositor);
+        vm.expectRevert(BlindMint.NoPoints.selector);
+        mint.deposit{value: grossValue}(none);
+    }
+
     function test_announce_acceptsNoNotesWhenTheDepositMintsNothing() public {
         uint256 id = _dustDeposit(rung - 1);
         (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) = _empty();

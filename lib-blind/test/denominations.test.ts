@@ -87,9 +87,10 @@ describe("pointCount", () => {
     expect(pointCount(grossFor(3n * USDC))).toBe(3 + SLACK);
   });
 
-  it("carries slack alone when the deposit mints nothing", () => {
-    // The contract refuses a deposit that carries no point, so this must stay above zero.
-    expect(pointCount(CENT)).toBe(SLACK);
-    expect(pointCount(1n)).toBe(SLACK);
+  it("counts no point when the deposit mints nothing", () => {
+    // The mint signs none of them, so a point would only cost a wallet. `BlindMint.deposit`
+    // accepts an empty list for exactly this deposit.
+    expect(pointCount(CENT)).toBe(0);
+    expect(pointCount(1n)).toBe(0);
   });
 });
