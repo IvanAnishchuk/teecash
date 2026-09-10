@@ -274,10 +274,6 @@ claim. A wallet signs only when its holder spends it.
 `TEECASH_WALLETS` selects the provider. `local` keeps a private key in the state file.
 `privy` asks Privy for a wallet and lets Privy hold the key.
 
-Privy does not need to support Arc. Its `signTransaction` takes a plain `chainId` and no
-CAIP-2 network, so Privy signs and this client broadcasts over its own RPC. Gas
-sponsorship is the one feature that would need Privy to know the chain.
-
 ## Trust model
 
 | Party | Can steal? | Can link? |

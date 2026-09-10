@@ -7,10 +7,6 @@
  *
  * `local` keeps the private key in the state file. `privy` asks Privy for a wallet and
  * lets Privy hold the key.
- *
- * Privy does not need to support the chain. `signTransaction` carries a plain `chainId`
- * and no CAIP-2 network, so Privy signs and this CLI broadcasts over its own RPC. Gas
- * sponsorship is the one feature that would need Privy to know the chain.
  */
 
 import { existsSync } from "node:fs";

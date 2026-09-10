@@ -458,8 +458,7 @@ export async function spend(id?: string): Promise<void> {
  * The check makes one wallet, signs a transaction for the target chain and recovers the
  * signer from the signature. It broadcasts nothing.
  *
- * The chain identifier defaults to Arc testnet. `signTransaction` carries no CAIP-2
- * network, so a successful signature shows that Privy does not gate the chain.
+ * The chain identifier defaults to Arc testnet.
  */
 export async function privyCheck(): Promise<void> {
   const chainId = Number(process.env.TEECASH_CHECK_CHAIN_ID ?? "5042002");
