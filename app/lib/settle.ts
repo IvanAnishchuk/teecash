@@ -162,6 +162,17 @@ export async function settleDeposit(deposit: Deposit): Promise<void> {
     return;
   }
 
+  // Keep what a reclaim needs. The contract fixes both values at the deposit, so this
+  // writes once and every later pass skips it. Without them a screen cannot say whether
+  // the deadline has passed, or which wallet the contract accepts.
+  if (deposit.deadline === undefined || deposit.depositor === undefined) {
+    await putDepositOnly({
+      ...deposit,
+      deadline: chain.deadline.toString(),
+      depositor: chain.depositor,
+    });
+  }
+
   const stored = await notesOfDeposit(deposit.id);
 
   // A melt of a wallet below two rungs mints nothing, so it carries no point and this

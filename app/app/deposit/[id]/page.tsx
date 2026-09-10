@@ -10,12 +10,15 @@
  * A user can leave at any moment. The deposit finishes anyway, on any screen.
  */
 
+import { useWallets } from "@privy-io/react-auth";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { usdc } from "../../../lib/chain";
+import { explain } from "../../../lib/errors";
 import { depositsOf, discardDeposit, fromAmount, notesOfDeposit } from "../../../lib/notes";
 import type { Deposit, Note } from "../../../lib/notes";
+import { paidBy, reclaimDeposit, reclaimable } from "../../../lib/refund";
 import { settled } from "../../../lib/settle";
 import { useVault } from "../../../lib/vault";
 
@@ -26,8 +29,11 @@ export default function DepositScreen() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { userId } = useVault();
+  const { wallets } = useWallets();
   const [deposit, setDeposit] = useState<Deposit>();
   const [notes, setNotes] = useState<Note[]>([]);
+  const [reclaiming, setReclaiming] = useState(false);
+  const [reclaimError, setReclaimError] = useState<string>();
 
   const load = useCallback(async () => {
     if (!userId) return;
@@ -71,6 +77,46 @@ export default function DepositScreen() {
           </button>
         </p>
       )}
+
+      {reclaimable(deposit, notes, Date.now()) &&
+        (() => {
+          // Only the account that paid can reclaim. That wallet can sit on another device,
+          // so the screen names the address instead of offering a button that must fail.
+          const payer = wallets.find((w) => paidBy(deposit, w));
+          return (
+            <p className="sub">
+              The mint never answered this deposit, and the wait is over. The money is still
+              in the contract and you can take it back.{" "}
+              {payer ? (
+                <button
+                  className="ghost"
+                  disabled={reclaiming}
+                  onClick={async () => {
+                    setReclaimError(undefined);
+                    setReclaiming(true);
+                    try {
+                      await reclaimDeposit(payer, deposit);
+                      await load();
+                    } catch (err) {
+                      setReclaimError(explain(err, "The reclaim did not go through."));
+                    } finally {
+                      setReclaiming(false);
+                    }
+                  }}
+                >
+                  {reclaiming ? "Asking your wallet" : "Reclaim it"}
+                </button>
+              ) : (
+                <>
+                  Connect <span className="mono">{deposit.depositor}</span> to do it. The
+                  contract takes the account that paid and no other.
+                </>
+              )}
+            </p>
+          );
+        })()}
+
+      {reclaimError && <p className="sub">{reclaimError}</p>}
 
       <p>
         <Link href="/">Back to the balance</Link>

@@ -125,6 +125,20 @@ export interface Deposit {
    * happens then.
    */
   contract?: string;
+  /**
+   * The account that paid the deposit.
+   *
+   * `refundByDepositor` takes this account and no other, so a reclaim needs it. The field
+   * is absent until `settle.ts` reads the deposit from the chain.
+   */
+  depositor?: string;
+  /**
+   * The time after which the depositor can reclaim the deposit, in seconds.
+   *
+   * The contract fixes this at the deposit. A screen reads it from here instead of asking
+   * the chain, and it is a decimal string for the reason that `toAmount` gives.
+   */
+  deadline?: string;
   userId: string;
   /** The amount in native base units, as a decimal string. */
   amount: string;
