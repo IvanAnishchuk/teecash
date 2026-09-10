@@ -4,9 +4,10 @@ out/
 cache/
 broadcast/
 .env
+.env.*
+!.env*.example
 *.log
 
 # Next.js
 .next/
-.env*.local
 *.tsbuildinfo
