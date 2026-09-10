@@ -277,19 +277,32 @@ app-build:
     cd app && npm run build
 
 # Print every service that a full run needs. The list gives the order.
+#
+# The app runs against Arc. `just mint` is the CRE simulation, and the local profile leaves
+# the deployer as the forwarder, so that mint announces nothing there. `just mint-local`
+# answers one deposit and exits, so it is no service either. A local run is `just demo`.
+[doc('Print every service that a full run needs.')]
 [group('app')]
 app-help:
+    @echo "The app runs against Arc. Use \`just demo\` for a local run."
     @echo "Each line is one terminal. Start them in this order."
     @echo ""
-    @echo "  1. just anvil                      (local profile only)"
-    @echo "  2. TEECASH_ENV={{ profile }} just deploy"
-    @echo "  3. TEECASH_ENV={{ profile }} just app-env"
-    @echo "  4. TEECASH_ENV={{ profile }} just mint"
-    @echo "  5. TEECASH_ENV={{ profile }} just relayer"
-    @echo "  6. just app"
+    @echo "  1. TEECASH_ENV=arc just deploy"
+    @echo "     Then put the address it prints in workflow/blindmint/config.production.json."
+    @echo "     The trigger reads that file. An old address there mints nothing and says so"
+    @echo "     nowhere. Skip this step when \`just contract\` already names a deployment,"
+    @echo "     because a deploy resets .tmp/cli-state.json and that file holds every note."
+    @echo "  2. TEECASH_ENV=arc just app-env"
+    @echo "  3. TEECASH_ENV=arc just mint"
+    @echo "  4. TEECASH_ENV=arc just relayer"
+    @echo "  5. just app"
     @echo ""
-    @echo "Steps 1 to 3 exit. Steps 4 to 6 continue to run."
-    @echo "Step 6 needs no profile. Step 3 already wrote the chain into app/.env.local."
+    @echo "Steps 1 and 2 exit. Steps 3 to 5 continue to run."
+    @echo "Step 5 needs no profile. Step 2 already wrote the chain into app/.env.local."
+    @echo ""
+    @echo "Then open http://localhost:3000 and not http://127.0.0.1:3000. The other"
+    @echo "origin loses the HMR socket to the cross-origin guard. The first load compiles"
+    @echo "the application and shows \`Loading.\` for about a minute."
 
 # ---------------------------------------------------------------------------
 # Reading the tax on the chain.

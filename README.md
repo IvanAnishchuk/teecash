@@ -78,7 +78,7 @@ The same inputs give this address on a local anvil too.
 
 | Contract | Address |
 |---|---|
-| `BlindMint` | `0x04fBCd15D1bAf43AC48706ee1b43d4F98420A79a` |
+| `BlindMint` | `0x83Ec560fD759Aa73c9625e4983c3E467DE1473f4` |
 
 Measured cost on Arc:
 
@@ -179,6 +179,29 @@ generates `lib-blind/vectors.json`. The Solidity tests and the Go tests both rea
 
 `just` runs every task. `just` alone lists them.
 
+### What must already be there
+
+`just`, `node`, `npm`, `go`, `jq`, `curl`, the Foundry tools (`forge`, `cast`, `anvil`)
+and `cre`. Only `cre` needs an account. `cre login` gives it one, and a simulation needs
+nothing more.
+
+### Install
+
+The repository holds three Node packages and one submodule. Nothing builds until each one
+is there.
+
+```bash
+git submodule update --init                 # contracts/lib/forge-std
+npm install --prefix lib-blind              # the crypto. cli and app both link to it
+npm install --prefix cli
+npm install --prefix app
+```
+
+`cli` and `app` both name `@teecash/lib-blind` as `file:../lib-blind`, so install that one
+first.
+
+### Configure
+
 The chain belongs to a profile file and never to a command line. `TEECASH_ENV` names the
 profile. The default is `local`, because a mistake against a local anvil costs nothing.
 
@@ -228,15 +251,28 @@ no announcement, so the deposit stays pending.
 The app needs the mint and the relayer. Each one is a terminal of its own. `just app-help`
 prints the list.
 
+This flow is the Arc one. The local profile cannot drive it, because `just mint` is the CRE
+simulation and `.env.local` leaves the deployer as the forwarder. `just mint-local` answers
+one deposit and then exits, so it is not a service. Use `just demo` for a local run.
+
 ```bash
 export TEECASH_ENV=arc
 
-just deploy                             # exits
+just deploy                             # exits. This RESETS .tmp/cli-state.json
+# `deploy` prints the address. Put it in workflow/blindmint/config.production.json.
+# The trigger reads that file. A mint that still names the old address never fires, and
+# every deposit then waits for ever with no error anywhere.
 just app-env                            # exits. Writes app/.env.local
 just mint                               # stays
 just relayer                            # stays
-just app                                # stays. http://localhost:3000
+just app                                # stays
 ```
+
+Then open **http://localhost:3000**, not `http://127.0.0.1:3000`. The dev server serves
+one origin, and the other one loses the HMR socket to the cross-origin guard.
+
+Skip `deploy` when `just contract` already names a deployment. A deploy resets the state
+file, and that file holds every note. Copy it first if it holds anything.
 
 `app-env` writes `app/.env.local` from the profile and the state file. Do this after each
 deploy. A deploy changes the address, because the CREATE2 address covers every constructor
@@ -244,6 +280,10 @@ argument. Every value in that file reaches the browser bundle, and none of them 
 secret.
 
 `just relayer-health` reports whether the relayer answers.
+
+The first page load compiles the application, and the development bundle is above 50 MB.
+It takes about a minute and the browser shows `Loading.` for all of it. Later loads take
+seconds.
 
 ### Reading the tax
 
