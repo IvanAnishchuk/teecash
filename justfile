@@ -136,7 +136,7 @@ deposit amount:
 [doc('Run the mint. It fires on each deposit event and then waits again.')]
 [group('run')]
 mint:
-    @{{ load }} && cd workflow && GOMAXPROCS=2 cre workflow simulate blindmint --target "$CRE_TARGET" --broadcast --listen
+    @{{ load }} && cd workflow && GOMAXPROCS=2 cre workflow simulate blindmint --target "$CRE_TARGET" --non-interactive --broadcast --listen --trigger-index 0
 
 # Run the mint against one deposit that is already on the chain.
 #
@@ -145,7 +145,44 @@ mint:
 [doc('Run the mint against one deposit that is already on the chain.')]
 [group('run')]
 mint-once tx:
-    @{{ load }} && cd workflow && GOMAXPROCS=2 cre workflow simulate blindmint --target "$CRE_TARGET" --broadcast --evm-tx-hash {{ tx }} --evm-event-index 1
+    @{{ load }} && cd workflow && GOMAXPROCS=2 cre workflow simulate blindmint --target "$CRE_TARGET" --non-interactive --broadcast --trigger-index 0 --evm-tx-hash {{ tx }} --evm-event-index 1
+
+# Run the catch-up sweep of the mint once.
+#
+# The sweep is the second handler of the workflow, and in a deployment its own cron trigger
+# fires it. The simulator does not run a cron trigger on a timer, so this fires it by hand.
+# `--listen` cannot do it either, which the flag says itself.
+#
+# The sweep reads the deposit ledger and answers every deposit that still waits. It is safe
+# to repeat, because announce refuses a deposit that is not pending.
+[doc('Run the catch-up sweep of the mint once.')]
+[group('run')]
+mint-sweep:
+    @{{ load }} && cd workflow && GOMAXPROCS=2 cre workflow simulate blindmint --target "$CRE_TARGET" --non-interactive --broadcast --trigger-index 1
+
+# Print every deposit that still waits for the mint. This reads and announces nothing.
+[doc('Print every deposit that still waits for the mint.')]
+[group('info')]
+mint-pending:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{ load }}
+    address="$(just contract)"
+    next="$(cast call "$address" 'nextId()(uint256)' --rpc-url "$TEECASH_RPC")"
+    for (( id=1; id<next; id++ )); do
+        read -r depositor amount points deadline status < <(
+            cast call "$address" 'deposits(uint256)(address,uint256,uint256,uint256,uint8)' \
+                "$id" --rpc-url "$TEECASH_RPC" --json | jq -r '[.[0], .[1], .[2], .[3], .[4]] | @tsv'
+        )
+        case "$status" in
+            0) state="none" ;;
+            1) state="PENDING" ;;
+            2) state="announced" ;;
+            3) state="refunded" ;;
+            *) state="unknown" ;;
+        esac
+        echo "$id $state amount=$amount points=$points depositor=$depositor"
+    done
 
 # Run the mint on this machine. It replaces the CRE workflow for a local run. The
 # forwarder must be the deployer, because this account announces directly.

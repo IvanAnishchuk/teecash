@@ -53,6 +53,8 @@ github.com/smartcontractkit/cre-sdk-go v1.16.1-0.20260805200504-1708ea3f9933 h1:
 github.com/smartcontractkit/cre-sdk-go v1.16.1-0.20260805200504-1708ea3f9933/go.mod h1:FDmcK/My08vBNWqpKUQGtSxVEmECzPye3tpGOzVxw/k=
 github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm v1.0.0-beta.18 h1:PlFokXgQhnU/ZeiHPlZ/Be9oQ0U47Ad01Iu2QyXbB98=
 github.com/smartcontractkit/cre-sdk-go/capabilities/blockchain/evm v1.0.0-beta.18/go.mod h1:ZundlMInHtZxbm1L9hjpNetfn3IvEevJuHfeHKBSkS4=
+github.com/smartcontractkit/cre-sdk-go/capabilities/scheduler/cron v1.3.0 h1:qBZ4y6qlTOynSpU1QAi2Fgr3tUZQ332b6hit9EVZqkk=
+github.com/smartcontractkit/cre-sdk-go/capabilities/scheduler/cron v1.3.0/go.mod h1:Rzhy75vD3FqQo/SV6lypnxIwjWac6IOWzI5BYj3tYMU=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/tklauser/go-sysconf v0.3.12 h1:0QaGUFOdQaIVdPgfITYzaTegZvdCjmYO52cSFAEVmqU=
