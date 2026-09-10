@@ -61,6 +61,20 @@ export function meltable(balance: bigint, gas: bigint): bigint {
 const PASSES = 8;
 
 /**
+ * The gas that a deposit of `points` points uses.
+ *
+ * The figures come from Arc. A deposit of four points measured 102,247 and a deposit of
+ * seven measured 122,949, so each point costs about 7,000 and the rest is the base. The
+ * numbers here round both up, because this is a reserve and not a price.
+ *
+ * `estimateContractGas` gives the real figure. This function only has to keep the first
+ * guess of the amount close enough for that estimate to agree.
+ */
+export function depositGas(points: number): bigint {
+  return 90_000n + 15_000n * BigInt(points);
+}
+
+/**
  * Deposit the change of one wallet back into the contract.
  *
  * The function returns the local name of the new deposit. It returns undefined when the
@@ -82,8 +96,16 @@ export async function meltWallet(
   const fees = await publicClient.estimateFeesPerGas();
 
   for (let pass = 0; pass < PASSES; pass++) {
-    // Start from a generous reserve and lower the amount when the estimate disagrees.
-    const guess = meltable(balance, fees.maxFeePerGas * 400000n) - BigInt(pass) * MIN_DENOM;
+    // Reserve the gas of the deposit that this melt sends, and not the gas of the largest
+    // deposit. The point count sets that gas, and a wallet of dust sends a deposit of no
+    // points. A flat reserve for many points is larger than the dust itself, and the melt
+    // then gives up before it asks the chain anything.
+    //
+    // The count comes from the whole balance, which is at or above the amount that this
+    // pass sends. The reserve is therefore never short. `estimateContractGas` below reads
+    // the real figure, and the pass after this one lowers the amount when it disagrees.
+    const reserve = fees.maxFeePerGas * depositGas(pointCount(balance - DUST));
+    const guess = meltable(balance, reserve) - BigInt(pass) * MIN_DENOM;
     if (guess <= 0n) return undefined;
 
     const points = pointCount(guess);
