@@ -39,8 +39,17 @@ const DEPOSITS = "deposits";
  */
 export type NoteStatus = "awaiting-mint" | "ready" | "claimed" | "spent" | "unused";
 
-/** The state of one deposit. */
-export type DepositStatus = "pending" | "announced" | "claimed" | "refunded";
+/**
+ * The state of one deposit.
+ *
+ * `pending` the deposit is on chain and the mint has not answered.
+ * `announced` the mint answered and some note still needs a claim.
+ * `claimed` every note of the deposit is settled.
+ * `refunded` the contract returned the money to the depositor.
+ * `stranded` the settler cannot move this deposit and it will not try again. The money is
+ * not always lost. `settle.ts` names each cause and says what recovers it.
+ */
+export type DepositStatus = "pending" | "announced" | "claimed" | "refunded" | "stranded";
 
 export interface Note {
   /** The address of the note wallet. The contract keys the claimed set on it. */
@@ -87,6 +96,21 @@ export interface Deposit {
    * `txHash`, and it repeats that step until the read succeeds.
    */
   onChainId?: string;
+  /**
+   * The BlindMint deployment that holds this deposit.
+   *
+   * `onChainId` counts from one inside one deployment. The same number therefore names a
+   * different deposit in another deployment. A record without this address cannot tell its
+   * own announcement from the announcement of a stranger.
+   *
+   * The domain tag covers the chain and this address, so the address also decides which
+   * signatures verify. A record that names its deployment stays claimable after this build
+   * points at a new one.
+   *
+   * The field is absent on a record that an older build wrote. `settle.ts` says what
+   * happens then.
+   */
+  contract?: string;
   userId: string;
   /** The amount in native base units, as a decimal string. */
   amount: string;

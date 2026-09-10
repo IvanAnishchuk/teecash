@@ -36,6 +36,19 @@ export const RELAYER_URL =
   process.env.NEXT_PUBLIC_TEECASH_RELAYER ?? "http://127.0.0.1:8787";
 
 /**
+ * The blocks that a search for an announcement covers.
+ *
+ * Every log search must have an upper bound. A search from `fromBlock` to the head grows
+ * with each pass. The settler repeats each pass every few seconds. One deposit that never
+ * settles then costs more on each call, without a limit.
+ *
+ * Arc makes about two blocks each second, so this window covers about an hour. The
+ * contract lets a depositor reclaim a pending deposit after one hour. A deposit with no
+ * announcement inside this window is therefore a deposit to refund.
+ */
+export const ANNOUNCE_WINDOW = 7200n;
+
+/**
  * The chain.
  *
  * The native token of Arc uses 18 decimals. The ERC-20 interface at `0x3600...0000`

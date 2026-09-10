@@ -17,26 +17,35 @@ import { LADDER, blind, fromHex, toHex, unblind, verify } from "@teecash/lib-bli
 import type { Domain } from "@teecash/lib-blind";
 import type { Address, Hex } from "viem";
 import { blindMintAbi } from "./abi";
-import { CHAIN_ID, RELAYER_URL, contract, publicClient } from "./chain";
+import { ANNOUNCE_WINDOW, CHAIN_ID, RELAYER_URL, contract, publicClient } from "./chain";
 import type { Note } from "./notes";
 
-/** The domain tag of this deployment. It covers the chain and the contract, not the amount. */
-export function domain(): Domain {
-  return { chainId: CHAIN_ID, contract: contract() };
+/**
+ * The domain tag of one deployment. It covers the chain and the contract, not the amount.
+ *
+ * The address is a parameter, because a record can name a deployment that this build no
+ * longer names. The tag of that record must stay the tag of its own deployment. Every
+ * signature it holds fails to verify otherwise.
+ */
+export function domain(address: Address = contract()): Domain {
+  return { chainId: CHAIN_ID, contract: address };
 }
 
 /**
- * Read one public key for each denomination.
+ * Read one public key for each denomination of one deployment.
  *
  * The contract holds them, so a wrong key here becomes a failed check and never a bad
  * claim. This function caches the result for the life of the page. The keys never change,
  * because a new key needs a new deployment.
+ *
+ * The cache holds one map for each address. A single map would answer for the wrong
+ * deployment after the first read.
  */
-let pubkeys: Map<string, Uint8Array> | undefined;
+const pubkeys = new Map<string, Map<string, Uint8Array>>();
 
-export async function mintPubkeys(): Promise<Map<string, Uint8Array>> {
-  if (pubkeys) return pubkeys;
-  const address = contract();
+export async function mintPubkeys(address: Address = contract()): Promise<Map<string, Uint8Array>> {
+  const cached = pubkeys.get(address.toLowerCase());
+  if (cached) return cached;
   const found = new Map<string, Uint8Array>();
   for (const denom of LADDER) {
     const key = await publicClient.readContract({
@@ -47,8 +56,40 @@ export async function mintPubkeys(): Promise<Map<string, Uint8Array>> {
     });
     found.set(denom.toString(), fromHex(key));
   }
-  pubkeys = found;
+  pubkeys.set(address.toLowerCase(), found);
   return found;
+}
+
+/** The on-chain state of one deposit. The order matches the `Status` enum of the contract. */
+export const ON_CHAIN_STATUS = ["none", "pending", "announced", "refunded"] as const;
+export type OnChainStatus = (typeof ON_CHAIN_STATUS)[number];
+
+/**
+ * Read the state of one deposit from its own deployment.
+ *
+ * This is one view call. It answers what a log search cannot. `none` means that the
+ * deployment does not hold this number at all. `refunded` means that the money is already
+ * back with the depositor.
+ *
+ * The settler asks this before it searches for an announcement. A search costs far more
+ * than a view call. Most passes need no search.
+ */
+export async function onChainDeposit(
+  depositId: string,
+  address: Address = contract(),
+): Promise<{ status: OnChainStatus; amount: bigint; deadline: bigint; depositor: Address }> {
+  const [depositor, amount, , deadline, status] = await publicClient.readContract({
+    address,
+    abi: blindMintAbi,
+    functionName: "deposits",
+    args: [BigInt(depositId)],
+  });
+  return {
+    status: ON_CHAIN_STATUS[Number(status)] ?? "none",
+    amount,
+    deadline,
+    depositor,
+  };
 }
 
 /**
@@ -61,8 +102,9 @@ export function blindWallets(
   wallets: { address: Address; walletId: string }[],
   userId: string,
   depositId: string,
+  address: Address = contract(),
 ): Note[] {
-  const d = domain();
+  const d = domain(address);
   return wallets.map((wallet, pointIndex) => {
     const { blinded, r } = blind(wallet.address, d);
     return {
@@ -89,16 +131,28 @@ export interface Announcement {
  *
  * The search starts at the block of the deposit. Arc prunes history, so a search from
  * block zero fails. This function returns `undefined` until the mint answers.
+ *
+ * The search also stops at `ANNOUNCE_WINDOW` blocks after the deposit. An open upper bound
+ * grows with the head. The settler repeats this call every few seconds. The mint answers
+ * in about a minute, so an announcement outside this window does not exist.
+ *
+ * The head bounds that end as well. Arc refuses a range that reaches past the head, and it
+ * answers "requested data not available". A deposit of this minute is thousands of blocks
+ * below `fromBlock + ANNOUNCE_WINDOW`. The node caches the head, so this call is cheap.
  */
 export async function findAnnouncement(
   depositId: string,
   fromBlock: bigint,
+  address: Address = contract(),
 ): Promise<Announcement | undefined> {
+  const head = await publicClient.getBlockNumber();
+  const last = fromBlock + ANNOUNCE_WINDOW;
   const logs = await publicClient.getContractEvents({
-    address: contract(),
+    address,
     abi: blindMintAbi,
     eventName: "Announced",
     fromBlock,
+    toBlock: last < head ? last : head,
     args: { id: BigInt(depositId) },
   });
   if (logs.length === 0) return undefined;
@@ -113,15 +167,38 @@ export async function findAnnouncement(
  * The function drops a signature that fails the check.
  *
  * The function returns the notes it changed. It does not write them.
+ *
+ * `foreign` says that the announcement belongs to another deposit. It is true when this
+ * deposit held a signature to check and not one of them verified. The caller must then
+ * write nothing.
+ *
+ * That case must never mark a point unused. A note loses its blinding factor at that
+ * moment. The blinding factor exists in this browser and nowhere else. A note without it
+ * can never be unblinded, so a wrong announcement would take the money of every point that
+ * the stranger did not sign.
+ *
+ * An announcement of no points is not foreign. The contract accepts an empty announcement,
+ * and only for a deposit that mints nothing. Every point of such a deposit is unused, which
+ * is what the mint decided. There is no signature to check, so there is nothing to fail.
  */
 export async function applyAnnouncement(
   notes: Note[],
   announcement: Announcement,
-): Promise<{ ready: Note[]; unused: Note[]; failed: string[] }> {
-  const keys = await mintPubkeys();
-  const d = domain();
+  address: Address = contract(),
+): Promise<{ ready: Note[]; unused: Note[]; failed: string[]; foreign: boolean }> {
+  const keys = await mintPubkeys(address);
+  const d = domain(address);
   const ready: Note[] = [];
   const failed: string[] = [];
+  // `checked` counts the points that this pass could test. A point is testable when this
+  // deposit holds it and the note still carries its blinding factor. `verified` counts the
+  // points that passed.
+  //
+  // A note whose blinding factor is already gone counts as neither. Its absence says that
+  // some earlier pass unblinded it. It does not say which deployment signed it, so it is no
+  // evidence that this announcement belongs here.
+  let checked = 0;
+  let verified = 0;
 
   announcement.pointIndexes.forEach((pointIndex, i) => {
     const note = notes.find((n) => n.pointIndex === Number(pointIndex));
@@ -138,15 +215,24 @@ export async function applyAnnouncement(
       return;
     }
 
+    checked++;
     const sig = unblind(fromHex(announcement.blindSigs[i]), fromHex(note.r));
     if (!verify(key, note.address, sig, d)) {
       failed.push(`the signature for ${note.address} does not verify`);
       return;
     }
 
+    verified++;
     const { r: _r, ...rest } = note;
     ready.push({ ...rest, denom: denom.toString(), sig: toHex(sig) as Hex, status: "ready" });
   });
+
+  // This deposit held signatures to check and not one of them verified. The announcement
+  // belongs to another deposit. Return before the unused set is built, because that set
+  // removes a blinding factor that nothing can rebuild.
+  if (checked > 0 && verified === 0) {
+    return { ready: [], unused: [], failed, foreign: true };
+  }
 
   // Every deposit carries more points than the split needs, and the mint signs only the
   // points it uses. A point that the announcement leaves out therefore holds no value and
@@ -159,7 +245,7 @@ export async function applyAnnouncement(
       return { ...rest, status: "unused" as const };
     });
 
-  return { ready, unused, failed };
+  return { ready, unused, failed, foreign: false };
 }
 
 /**

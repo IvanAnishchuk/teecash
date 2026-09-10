@@ -15,6 +15,7 @@ import Link from "next/link";
 import { usdc } from "../lib/chain";
 import { fromAmount } from "../lib/notes";
 import type { Note } from "../lib/notes";
+import { finished } from "../lib/settle";
 import { useVault } from "../lib/vault";
 
 /** Group the claimed notes by denomination, largest first. */
@@ -46,7 +47,10 @@ export default function Balance() {
   }
 
   const groups = byDenomination(notes);
-  const unfinished = deposits.filter((d) => d.status !== "claimed" && d.status !== "refunded");
+  // `finished` owns this test. A deposit that the settler stopped is finished. A list that
+  // counts it as money on the way says that it arrives, and it does not.
+  const unfinished = deposits.filter((d) => !finished(d));
+  const stranded = deposits.filter((d) => d.status === "stranded");
 
   return (
     <main>
@@ -73,6 +77,14 @@ export default function Balance() {
 
       {balance === 0n && unfinished.length === 0 && !loading && (
         <p className="sub">There is no money here yet. Add some.</p>
+      )}
+
+      {stranded.length > 0 && (
+        <p className="sub">
+          {usdc(stranded.reduce((total, d) => total + fromAmount(d.amount), 0n))} sits in a deposit
+          that this application cannot finish. The money is not lost. It belongs to an older
+          deployment of the contract.
+        </p>
       )}
 
 

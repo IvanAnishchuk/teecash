@@ -3,9 +3,10 @@
 /**
  * The deposit screen.
  *
- * The user types an amount. The screen shows the smallest split and the number of points
- * the deposit will carry. The mint may choose a different split, so the point count is a
- * cap and not a prediction.
+ * The user types the amount to mint. The transaction carries one rung more, because the
+ * mint tax is extra and not part of the notes. The screen shows the tax, the smallest
+ * split and the number of points the deposit will carry. The mint may choose a different
+ * split, so the point count is a cap and not a prediction.
  *
  * On confirm the client makes one wallet for each point, blinds each address, and asks the
  * external wallet of the user to sign `deposit`. The money enters the contract from a
@@ -19,7 +20,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createWalletClient, custom, parseUnits } from "viem";
 import type { Address } from "viem";
-import { LADDER, pointCount, splitGreedy } from "@teecash/lib-blind";
+import { LADDER, MIN_DENOM, grossFor, mintable, pointCount, splitGreedy, tax } from "@teecash/lib-blind";
 import { blindMintAbi } from "../../lib/abi";
 import { explain } from "../../lib/errors";
 import { CHAIN_ID, chain, contract, publicClient, usdc } from "../../lib/chain";
@@ -63,17 +64,25 @@ export default function DepositScreen() {
 
   // The field holds "", "0" and "3." on the way to "3.25". None of those is a mistake, so
   // none of them makes a message. `splitGreedy` throws on an amount of zero.
+  //
+  // `amount` is what the transaction carries. `minted` is what the user receives in notes.
+  // The difference is the tax.
   let amount: bigint | undefined;
+  let minted = 0n;
+  let fee = 0n;
   let split: bigint[] = [];
   let points = 0;
   let parseError: string | undefined;
   try {
     const typed = amountText.trim();
-    amount = typed.length > 0 ? parseUnits(typed, 18) : undefined;
-    if (amount === undefined || amount <= 0n) {
+    const net = typed.length > 0 ? parseUnits(typed, 18) : undefined;
+    if (net === undefined || net <= 0n) {
       amount = undefined;
     } else {
-      split = splitGreedy(amount);
+      amount = grossFor(net);
+      minted = mintable(amount);
+      fee = tax(amount);
+      split = minted > 0n ? splitGreedy(minted) : [];
       points = pointCount(amount);
     }
   } catch (err) {
@@ -98,13 +107,19 @@ export default function DepositScreen() {
       // to the chain.
       const depositId = crypto.randomUUID();
       const draft = blindWallets(made, userId, depositId);
+      // The record holds what the deposit mints. The tax leaves the contract when the
+      // mint announces. Every balance on the screens reads this field.
       const record: Deposit = {
         id: depositId,
         userId,
-        amount: toAmount(amount),
+        amount: toAmount(minted),
         block: "0",
         status: "pending",
         createdAt: Date.now(),
+        // The deployment that numbers this deposit. `onChainId` counts from one inside one
+        // deployment, so a record without this address cannot find its own announcement
+        // after the build points at another one.
+        contract: contract(),
       };
       await putDeposit(record, draft);
       draftRecord = record;
@@ -174,6 +189,18 @@ export default function DepositScreen() {
       ) : (
         <div className="card">
           <div className="line">
+            <span>You receive</span>
+            <span className="dim">{usdc(minted)}</span>
+          </div>
+          <div className="line">
+            <span>Mint tax</span>
+            <span className="dim">{usdc(fee)}</span>
+          </div>
+          <div className="line">
+            <span>Your wallet pays</span>
+            <span className="dim">{amount === undefined ? "-" : usdc(amount)}</span>
+          </div>
+          <div className="line">
             <span>Smallest split</span>
             <span className="dim">{split.map((d) => usdc(d)).join(" + ")}</span>
           </div>
@@ -203,7 +230,20 @@ export default function DepositScreen() {
         </p>
       )}
 
-      <button onClick={start} disabled={step !== undefined || !external || amount === undefined}>
+      {amount !== undefined && minted === 0n && (
+        <p className="fail">
+          This amount mints nothing. The tax takes one rung and everything below it, so a
+          deposit has to ask for at least {usdc(MIN_DENOM)}.
+        </p>
+      )}
+
+      {/* `minted === 0n` closes the button. The contract accepts such a deposit and the
+          treasury takes all of it, so nothing on the chain refuses a user who pays for no
+          note at all. */}
+      <button
+        onClick={start}
+        disabled={step !== undefined || !external || amount === undefined || minted === 0n}
+      >
         {step ?? "Deposit"}
       </button>
 

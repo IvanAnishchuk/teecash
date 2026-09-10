@@ -17,9 +17,20 @@
  *
  * The proof of risk 2 is a recovered address. The chain accepts a signature that recovers
  * to the note address. A returned hex string alone proves nothing.
+ *
+ * Risk 3. A note is one wallet, and Privy counts at most 150 wallets for one user. A
+ * balance of many small notes reaches that count, and the user can then send nothing. This
+ * screen unlinks the wallets that hold nothing and it then asks for one more wallet. The
+ * answer says whether an unlink returns the wallet to the count.
  */
 
-import { useCreateWallet, usePrivy, useSignTransaction, useWallets } from "@privy-io/react-auth";
+import {
+  useCreateWallet,
+  usePrivy,
+  useSignTransaction,
+  useUnlinkWallet,
+  useWallets,
+} from "@privy-io/react-auth";
 import { useState } from "react";
 import {
   type Address,
@@ -27,7 +38,8 @@ import {
   parseTransaction,
   recoverTransactionAddress,
 } from "viem";
-import { CHAIN_ID, chain, publicClient } from "../../lib/chain";
+import { CHAIN_ID, chain, publicClient, usdc } from "../../lib/chain";
+import { DUST, sendFromWallet } from "../../lib/privy";
 
 const WANTED = 3;
 
@@ -37,9 +49,12 @@ export default function Debug() {
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { createWallet } = useCreateWallet();
   const { signTransaction } = useSignTransaction();
+  const { unlink } = useUnlinkWallet();
   const { wallets } = useWallets();
   const [lines, setLines] = useState<Line[]>([]);
   const [busy, setBusy] = useState(false);
+  /** The address that a sweep pays. */
+  const [target, setTarget] = useState("");
 
   const say = (text: string, state: Line["state"] = "info") =>
     setLines((prev) => [...prev, { text, state }]);
@@ -125,6 +140,123 @@ export default function Debug() {
     }
   }
 
+  /**
+   * Ask whether an unlink returns a wallet to the count of 150.
+   *
+   * The answer is no. Privy sends `unlinkWallet` to the sign-in-with-Ethereum endpoint,
+   * which knows external wallets only, and an embedded wallet answers
+   * `linked_account_not_found`. The server API offers no delete for one wallet. A user that
+   * reaches the count can therefore only be deleted whole.
+   *
+   * This function proves that on one wallet and it stops. It never walks the whole set.
+   *
+   * A zero balance does not mean that a wallet is finished. Every point of a pending
+   * deposit reads zero while its money waits inside the contract, and `claim` pays the
+   * signed address whoever sends it. An unlink of those addresses would put the money of
+   * that deposit out of reach of this user. The one wallet below is the last one, which
+   * holds no note.
+   */
+  async function riskThree() {
+    setLines([]);
+    setBusy(true);
+    try {
+      say(`This user holds ${embedded.length} embedded wallet(s).`);
+      const last = embedded.at(-1);
+      if (!last) {
+        say("There is no embedded wallet.", "fail");
+        return;
+      }
+
+      const address = last.address as Address;
+      const balance = await publicClient.getBalance({ address });
+      if (balance > DUST) {
+        say(`${address.slice(0, 10)} holds ${usdc(balance)}. Empty it first.`, "fail");
+        return;
+      }
+
+      try {
+        await unlink({ address });
+        say(`unlink answered for ${address.slice(0, 10)}.`);
+      } catch (err) {
+        say(`unlink refused: ${String(err)}`, "fail");
+        say("An embedded wallet cannot be unlinked. Only the whole user can be deleted.");
+        return;
+      }
+
+      // A wallet that Privy still counts gives the same refusal as before the unlink.
+      try {
+        const made = await createWallet({ createAdditional: true });
+        say(`createWallet answered ${made.address}. An unlink returns the wallet.`, "pass");
+      } catch (err) {
+        say(`createWallet still refuses: ${String(err)}`, "fail");
+      }
+    } catch (err) {
+      say(`the run failed: ${String(err)}`, "fail");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Move the money of every embedded wallet to one address.
+   *
+   * A wallet pays its own fee, so a wallet that holds less than one fee cannot send. Those
+   * hold dust and the run reports them and continues.
+   *
+   * This is the step before the user is deleted. Privy counts at most 150 wallets for one
+   * user and it gives no way to return one, so a user that reaches the count can only start
+   * again. The money must leave first.
+   */
+  async function sweepAll() {
+    setLines([]);
+    setBusy(true);
+    try {
+      const to = target.trim() as Address;
+      if (!/^0x[0-9a-fA-F]{40}$/.test(to)) {
+        say("Give the address that receives the money.", "fail");
+        return;
+      }
+      say(`Reading ${embedded.length} wallet(s).`);
+
+      let moved = 0n;
+      let sent = 0;
+      let tooSmall = 0;
+      let failed = 0;
+      for (const wallet of embedded) {
+        const from = wallet.address as Address;
+        const balance = await publicClient.getBalance({ address: from });
+        if (balance <= DUST) continue;
+        try {
+          // `sendFromWallet` takes what the recipient receives, so the fee and the base
+          // unit that Arc keeps come off here.
+          const fees = await publicClient.estimateFeesPerGas();
+          const fee = 21000n * fees.maxFeePerGas;
+          const wanted = balance - fee - DUST;
+          if (wanted <= 0n) {
+            tooSmall++;
+            continue;
+          }
+          await sendFromWallet(signTransaction, from, to, wanted);
+          moved += wanted;
+          sent++;
+          say(`${from.slice(0, 10)} sent ${usdc(wanted)}`);
+        } catch (err) {
+          failed++;
+          say(`${from.slice(0, 10)} failed: ${String(err)}`, "fail");
+        }
+      }
+      say(
+        `${usdc(moved)} moved from ${sent} wallet(s). ` +
+          `${tooSmall} held less than one fee. ${failed} failed.`,
+        failed === 0 ? "pass" : "fail",
+      );
+    } catch (err) {
+      say(`the sweep failed: ${String(err)}`, "fail");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (!ready) return <main>Loading.</main>;
 
   return (
@@ -158,6 +290,38 @@ export default function Debug() {
             <strong>Risk 2. A browser signature for chain {CHAIN_ID}.</strong>
             <p className="sub">Sign one transaction and recover the signer from it.</p>
             <button onClick={riskTwo} disabled={busy}>
+              Run
+            </button>
+          </div>
+
+          <div className="card">
+            <strong>Empty every wallet.</strong>
+            <p className="sub">
+              Send the money of every embedded wallet to one address. Do this before the user
+              is deleted, because a deleted user takes its wallets with it.
+            </p>
+            <label>
+              <span>Pay to</span>
+              <input
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                placeholder="0x..."
+                disabled={busy}
+              />
+            </label>
+            <button onClick={sweepAll} disabled={busy}>
+              Sweep
+            </button>
+          </div>
+
+          <div className="card">
+            <strong>Risk 3. The wallet count of one user.</strong>
+            <p className="sub">
+              Unlink the last embedded wallet and then ask for one more. The answer says whether
+              an unlink returns the wallet to the count of 150. It does not: Privy knows no
+              unlink for an embedded wallet.
+            </p>
+            <button onClick={riskThree} disabled={busy}>
               Run
             </button>
           </div>

@@ -33,6 +33,13 @@ const CAUSES: [RegExp, string][] = [
     "Your wallet is on another chain. Change it to this network and try again.",
   ],
   [/already claimed/i, "This note is already claimed."],
+  [
+    // Each note is a wallet, and the wallet provider counts the wallets of one user. A
+    // balance of many small notes reaches that count. The message must say so, because
+    // nothing the user can see explains why a send stops.
+    /cannot be attributed to more than \d+ wallets|too many wallets/i,
+    "This account reached the wallet limit of the wallet provider. Send the small notes together, or sign in with another account.",
+  ],
 ];
 
 /**
