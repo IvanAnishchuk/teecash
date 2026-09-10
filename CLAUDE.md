@@ -46,8 +46,16 @@ does not show up anywhere else.
 - **The mint chooses the split.** The client blinds an address and nothing else, so the
   denomination comes only from the key that signs. The client sends a cap, not a
   prediction.
-- `announce` publishes the denominations, so the contract enforces `sum(denoms) == X`,
-  distinct point indexes and indexes in range.
+- `announce` publishes the denominations, so the contract enforces
+  `sum(denoms) == mintable(X)`, distinct point indexes and indexes in range.
+- **The mint tax is one rung plus the remainder below the rung.** `mintable` appears in
+  Solidity, in Go and in TypeScript. All three must agree, or every announcement reverts.
+  The tax goes to the treasury at the announcement. A refund pays no tax.
+- **The tax is extra and not part of the amount that a client asks for.** `grossFor` adds
+  the rung before the deposit. A client that subtracted the tax from a round amount would
+  change a three-note split into a twenty-note split.
+- A deposit of any amount is legal. A deposit below two rungs mints nothing and announces
+  no note.
 - `claim` cannot tell whether a signature was announced. `totalClaimed <= totalAnnounced`
   is the only bound on a mint that signs off band.
 - Blind the **address**, not a public key. The contract recomputes `H_to_G2(A)` from the

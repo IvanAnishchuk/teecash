@@ -1,6 +1,18 @@
 export { blind, hashToG2, randomScalar, unblind } from "./blind.ts";
 export type { Blinded } from "./blind.ts";
-export { CENT, LADDER, MIN_DENOM, SLACK, isDenom, pointCount, secretId, splitGreedy } from "./denominations.ts";
+export {
+  CENT,
+  LADDER,
+  MIN_DENOM,
+  SLACK,
+  grossFor,
+  isDenom,
+  mintable,
+  pointCount,
+  secretId,
+  splitGreedy,
+  tax,
+} from "./denominations.ts";
 export { dst } from "./domain.ts";
 export type { Domain } from "./domain.ts";
 export { G1_BYTES, G2_BYTES, fromHex, g1FromBytes, g1ToBytes, g2FromBytes, g2ToBytes, toHex } from "./eip2537.ts";

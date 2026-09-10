@@ -18,6 +18,7 @@ contract OnReportTest is Test {
     address internal creForwarder = makeAddr("creForwarder");
     address internal depositor = makeAddr("depositor");
     address internal stranger = makeAddr("stranger");
+    address internal treasury = makeAddr("treasury");
 
     string internal json;
     uint256 internal noteCount;
@@ -27,6 +28,9 @@ contract OnReportTest is Test {
     bytes[] internal blindSigOf;
     bytes[] internal sigOf;
     uint256 internal totalValue;
+    uint256 internal rung;
+    /// @dev The deposit that mints `totalValue`. The tax is extra and not part of the notes.
+    uint256 internal grossValue;
 
     function setUp() public {
         json = vm.readFile("../lib-blind/vectors.json");
@@ -52,8 +56,12 @@ contract OnReportTest is Test {
 
         vm.chainId(CHAIN_ID);
         // The CRE forwarder writes straight to the mint. Nothing sits between them.
-        deployCodeTo("BlindMint.sol:BlindMint", abi.encode(creForwarder, REFUND_DELAY, denoms, pubkeys), DEPLOYED_AT);
+        deployCodeTo(
+            "BlindMint.sol:BlindMint", abi.encode(creForwarder, treasury, REFUND_DELAY, denoms, pubkeys), DEPLOYED_AT
+        );
         mint = BlindMint(DEPLOYED_AT);
+        rung = mint.rung();
+        grossValue = totalValue + rung;
 
         vm.deal(depositor, 1000e18);
     }
@@ -78,7 +86,7 @@ contract OnReportTest is Test {
         points[noteCount] = blindedOf[0];
         points[noteCount + 1] = blindedOf[1];
         vm.prank(depositor);
-        id = mint.deposit{value: totalValue}(points);
+        id = mint.deposit{value: grossValue}(points);
     }
 
     function test_report_reachesAPaidWallet() public {
@@ -87,6 +95,7 @@ contract OnReportTest is Test {
         vm.prank(creForwarder);
         mint.onReport("", _report(id));
         assertEq(mint.totalAnnounced(), totalValue);
+        assertEq(treasury.balance, rung, "the report path did not pay the tax");
 
         for (uint256 i = 0; i < noteCount; i++) {
             mint.claim(denomOf[i], walletOf[i], sigOf[i]);

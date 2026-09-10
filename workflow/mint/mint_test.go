@@ -150,14 +150,49 @@ func oneUsdc() *big.Int {
 	return new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 }
 
+// grossFor returns the deposit that mints net. The tax is extra and not part of the
+// notes. A client that wants three USDC of notes sends three USDC and one rung.
+func grossFor(m *Mint, net *big.Int) *big.Int {
+	return new(big.Int).Add(net, m.Rung())
+}
+
+// The three implementations must agree on this function. `BlindMint.mintable` and
+// `mintable` in lib-blind carry the same numbers.
+func TestMintable(t *testing.T) {
+	m := newMint(t, load(t))
+	rung := m.Rung()
+	usdc := oneUsdc()
+	three := new(big.Int).Mul(big.NewInt(3), usdc)
+
+	cases := []struct {
+		name   string
+		amount *big.Int
+		want   *big.Int
+	}{
+		{"one rung above three USDC", new(big.Int).Add(three, rung), three},
+		{"a remainder below the rung", new(big.Int).Add(new(big.Int).Add(three, rung), big.NewInt(7)), three},
+		{"two rungs", new(big.Int).Mul(rung, big.NewInt(2)), rung},
+		{"one rung", rung, new(big.Int)},
+		{"below one rung", new(big.Int).Sub(rung, big.NewInt(1)), new(big.Int)},
+		{"nothing", new(big.Int), new(big.Int)},
+	}
+	for _, c := range cases {
+		if got := m.Mintable(c.amount); got.Cmp(c.want) != 0 {
+			t.Errorf("Mintable(%s) [%s]: got %s, want %s", c.amount, c.name, got, c.want)
+		}
+	}
+}
+
 func TestSplit(t *testing.T) {
 	m := newMint(t, load(t))
 	usdc := oneUsdc()
 
+	// The amounts are what the client wants to mint. Split takes the deposit, so each
+	// case grosses up by one rung first.
 	cases := []struct {
-		amount int64
-		max    int
-		want   []int64
+		net  int64
+		max  int
+		want []int64
 	}{
 		{111, 8, []int64{100, 10, 1}},
 		{100, 8, []int64{100}},
@@ -165,38 +200,77 @@ func TestSplit(t *testing.T) {
 		{23, 8, []int64{10, 10, 1, 1, 1}},
 	}
 	for _, c := range cases {
-		got, err := m.Split(new(big.Int).Mul(big.NewInt(c.amount), usdc), c.max)
+		net := new(big.Int).Mul(big.NewInt(c.net), usdc)
+		got, err := m.Split(grossFor(m, net), c.max)
 		if err != nil {
-			t.Fatalf("Split(%d): %v", c.amount, err)
+			t.Fatalf("Split(%d): %v", c.net, err)
 		}
 		if len(got) != len(c.want) {
-			t.Fatalf("Split(%d): got %d notes, want %d", c.amount, len(got), len(c.want))
+			t.Fatalf("Split(%d): got %d notes, want %d", c.net, len(got), len(c.want))
 		}
 		sum := new(big.Int)
 		for i, d := range got {
 			if want := new(big.Int).Mul(big.NewInt(c.want[i]), usdc); d.Cmp(want) != 0 {
-				t.Errorf("Split(%d) note %d: got %s, want %s", c.amount, i, d, want)
+				t.Errorf("Split(%d) note %d: got %s, want %s", c.net, i, d, want)
 			}
 			sum.Add(sum, d)
 		}
-		if want := new(big.Int).Mul(big.NewInt(c.amount), usdc); sum.Cmp(want) != 0 {
-			t.Errorf("Split(%d): the sum is %s", c.amount, sum)
+		if sum.Cmp(net) != 0 {
+			t.Errorf("Split(%d): the sum is %s and the client asked for %s", c.net, sum, net)
+		}
+	}
+}
+
+// The split must always sum to what the contract expects. `_announce` reverts otherwise.
+func TestSplitSumsToTheMintablePart(t *testing.T) {
+	m := newMint(t, load(t))
+	rung := m.Rung()
+	usdc := oneUsdc()
+
+	amounts := []*big.Int{
+		big.NewInt(1),
+		new(big.Int).Sub(rung, big.NewInt(1)),
+		rung,
+		new(big.Int).Add(rung, big.NewInt(7)),
+		new(big.Int).Mul(rung, big.NewInt(67)),
+		new(big.Int).Add(new(big.Int).Mul(rung, big.NewInt(67)), big.NewInt(12345)),
+		usdc,
+	}
+	for _, amount := range amounts {
+		got, err := m.Split(amount, 256)
+		if err != nil {
+			t.Fatalf("Split(%s): %v", amount, err)
+		}
+		sum := new(big.Int)
+		for _, d := range got {
+			sum.Add(sum, d)
+		}
+		if want := m.Mintable(amount); sum.Cmp(want) != 0 {
+			t.Errorf("Split(%s): the sum is %s and Mintable says %s", amount, sum, want)
 		}
 	}
 }
 
 func TestSplitRejectsTooFewPoints(t *testing.T) {
 	m := newMint(t, load(t))
-	amount := new(big.Int).Mul(big.NewInt(23), oneUsdc())
-	if _, err := m.Split(amount, 2); err == nil {
+	net := new(big.Int).Mul(big.NewInt(23), oneUsdc())
+	if _, err := m.Split(grossFor(m, net), 2); err == nil {
 		t.Error("Split accepted 2 points for a split that needs 5")
 	}
 }
 
-func TestSplitRejectsARemainder(t *testing.T) {
+// A deposit below two rungs is all tax. The contract accepts an empty announcement for
+// it, so this is a split of no notes and not an error.
+func TestSplitReturnsNothingForADepositThatMintsNothing(t *testing.T) {
 	m := newMint(t, load(t))
-	if _, err := m.Split(big.NewInt(1_500_000), 8); err == nil {
-		t.Error("Split accepted an amount that the ladder cannot express")
+	for _, amount := range []*big.Int{big.NewInt(1), big.NewInt(1_500_000), m.Rung()} {
+		got, err := m.Split(amount, 8)
+		if err != nil {
+			t.Fatalf("Split(%s): %v", amount, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("Split(%s): got %d notes, want none", amount, len(got))
+		}
 	}
 }
 
@@ -215,7 +289,7 @@ func TestSignDeposit(t *testing.T) {
 	}
 	points = append(points, unhex(t, v.Notes[0].Blinded), unhex(t, v.Notes[1].Blinded))
 
-	notes, err := m.SignDeposit(total, points)
+	notes, err := m.SignDeposit(grossFor(m, total), points)
 	if err != nil {
 		t.Fatalf("SignDeposit: %v", err)
 	}
@@ -236,6 +310,21 @@ func TestSignDeposit(t *testing.T) {
 		sum.Add(sum, n.Denom)
 	}
 	if sum.Cmp(total) != 0 {
-		t.Errorf("the denominations sum to %s and the deposit is %s", sum, total)
+		t.Errorf("the denominations sum to %s and the deposit mints %s", sum, total)
+	}
+}
+
+// A deposit that mints nothing produces no note. The workflow announces an empty list.
+func TestSignDepositSignsNothingForADust(t *testing.T) {
+	v := load(t)
+	m := newMint(t, v)
+	points := [][]byte{unhex(t, v.Notes[0].Blinded)}
+
+	notes, err := m.SignDeposit(big.NewInt(1), points)
+	if err != nil {
+		t.Fatalf("SignDeposit: %v", err)
+	}
+	if len(notes) != 0 {
+		t.Errorf("got %d notes for a deposit that mints nothing", len(notes))
 	}
 }

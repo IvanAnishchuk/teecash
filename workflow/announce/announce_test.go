@@ -73,3 +73,22 @@ func TestTrim0x(t *testing.T) {
 		}
 	}
 }
+
+// A deposit that mints nothing produces an announcement of no notes. The report must
+// still pack and unpack, because the contract accepts exactly that report.
+func TestEncodeReportWithNoNotes(t *testing.T) {
+	packed, err := EncodeReport(big.NewInt(7), nil)
+	if err != nil {
+		t.Fatalf("EncodeReport: %v", err)
+	}
+	id, indexes, denoms, sigs, err := DecodeReport(packed)
+	if err != nil {
+		t.Fatalf("DecodeReport: %v", err)
+	}
+	if id.Int64() != 7 {
+		t.Errorf("the identifier is %s, want 7", id)
+	}
+	if len(indexes) != 0 || len(denoms) != 0 || len(sigs) != 0 {
+		t.Errorf("got %d indexes, %d denominations and %d signatures, want none", len(indexes), len(denoms), len(sigs))
+	}
+}

@@ -22,6 +22,7 @@ contract BlindMintTest is Test {
     address internal forwarder = makeAddr("forwarder");
     address internal depositor = makeAddr("depositor");
     address internal stranger = makeAddr("stranger");
+    address internal treasury = makeAddr("treasury");
 
     string internal json;
     uint256 internal noteCount;
@@ -33,6 +34,11 @@ contract BlindMintTest is Test {
     bytes[] internal blindSigOf;
     bytes[] internal sigOf;
     uint256 internal totalValue;
+
+    /// @dev The smallest denomination of the ladder. The tax is one of these plus the rest.
+    uint256 internal rung;
+    /// @dev The deposit that mints `totalValue`. The tax is extra and not part of the notes.
+    uint256 internal grossValue;
 
     function setUp() public {
         json = vm.readFile("../lib-blind/vectors.json");
@@ -58,8 +64,12 @@ contract BlindMintTest is Test {
         }
 
         vm.chainId(CHAIN_ID);
-        deployCodeTo("BlindMint.sol:BlindMint", abi.encode(forwarder, REFUND_DELAY, denoms, pubkeys), DEPLOYED_AT);
+        deployCodeTo(
+            "BlindMint.sol:BlindMint", abi.encode(forwarder, treasury, REFUND_DELAY, denoms, pubkeys), DEPLOYED_AT
+        );
         mint = BlindMint(DEPLOYED_AT);
+        rung = mint.rung();
+        grossValue = totalValue + rung;
         vm.deal(depositor, 1000 * USDC);
     }
 
@@ -90,7 +100,21 @@ contract BlindMintTest is Test {
 
     function _deposit() internal returns (uint256 id) {
         vm.prank(depositor);
-        id = mint.deposit{value: totalValue}(_points());
+        id = mint.deposit{value: grossValue}(_points());
+    }
+
+    /// @dev A deposit that carries points but mints nothing. It is all tax.
+    function _dustDeposit(uint256 value) internal returns (uint256 id) {
+        bytes[] memory points = new bytes[](1);
+        points[0] = blindedOf[0];
+        vm.prank(depositor);
+        id = mint.deposit{value: value}(points);
+    }
+
+    function _empty() internal pure returns (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) {
+        idx = new uint256[](0);
+        denoms = new uint256[](0);
+        sigs = new bytes[](0);
     }
 
     function _announce(uint256 id) internal {
@@ -105,9 +129,11 @@ contract BlindMintTest is Test {
 
     function test_fullPath_depositAnnounceClaim() public {
         uint256 id = _deposit();
-        assertEq(address(mint).balance, totalValue);
+        assertEq(address(mint).balance, grossValue);
         _announce(id);
         assertEq(mint.totalAnnounced(), totalValue);
+        assertEq(treasury.balance, rung, "the treasury did not receive the tax");
+        assertEq(address(mint).balance, totalValue, "the tax stayed in the contract");
 
         for (uint256 i = 0; i < noteCount; i++) {
             assertEq(walletOf[i].balance, 0);
@@ -156,9 +182,7 @@ contract BlindMintTest is Test {
         denoms[0] = 10 * USDC;
         vm.prank(forwarder);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                BlindMint.SumMismatch.selector, totalValue + 10 * USDC - replaced, totalValue
-            )
+            abi.encodeWithSelector(BlindMint.SumMismatch.selector, totalValue + 10 * USDC - replaced, totalValue)
         );
         mint.announce(id, idx, denoms, sigs);
     }
@@ -208,7 +232,8 @@ contract BlindMintTest is Test {
         uint256 before = depositor.balance;
         vm.prank(depositor);
         mint.refundByDepositor(id);
-        assertEq(depositor.balance, before + totalValue);
+        assertEq(depositor.balance, before + grossValue);
+        assertEq(treasury.balance, 0, "a refund paid the tax");
     }
 
     function test_refundByMint_returnsThePendingDeposit() public {
@@ -216,7 +241,8 @@ contract BlindMintTest is Test {
         uint256 before = depositor.balance;
         vm.prank(forwarder);
         mint.refundByMint(id);
-        assertEq(depositor.balance, before + totalValue);
+        assertEq(depositor.balance, before + grossValue);
+        assertEq(treasury.balance, 0, "a refund paid the tax");
     }
 
     function test_refund_rejectsAnAnnouncedDeposit() public {
@@ -233,6 +259,65 @@ contract BlindMintTest is Test {
         vm.prank(depositor);
         vm.expectRevert(abi.encodeWithSelector(BLS.BadLength.selector, 2, BLS.G2_BYTES));
         mint.deposit{value: 1 * USDC}(points);
+    }
+
+    function test_mintable_keepsOneRungAndTheRemainder() public view {
+        assertEq(mint.mintable(3 * USDC + rung), 3 * USDC);
+        assertEq(mint.mintable(3 * USDC + rung + 7), 3 * USDC);
+        assertEq(mint.mintable(2 * rung), rung);
+        assertEq(mint.mintable(rung), 0);
+        assertEq(mint.mintable(rung - 1), 0);
+        assertEq(mint.mintable(0), 0);
+    }
+
+    function test_announce_acceptsNoNotesWhenTheDepositMintsNothing() public {
+        uint256 id = _dustDeposit(rung - 1);
+        (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) = _empty();
+        vm.prank(forwarder);
+        mint.announce(id, idx, denoms, sigs);
+
+        assertEq(mint.totalAnnounced(), 0);
+        assertEq(treasury.balance, rung - 1, "the treasury did not take the whole deposit");
+        assertEq(address(mint).balance, 0);
+    }
+
+    function test_announce_rejectsNoNotesWhenTheDepositMints() public {
+        uint256 id = _deposit();
+        (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) = _empty();
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSelector(BlindMint.SumMismatch.selector, 0, totalValue));
+        mint.announce(id, idx, denoms, sigs);
+    }
+
+    function test_announce_takesTheRemainderBelowTheRung() public {
+        uint256 extra = rung / 3;
+        vm.prank(depositor);
+        uint256 id = mint.deposit{value: grossValue + extra}(_points());
+        _announce(id);
+        assertEq(treasury.balance, rung + extra, "the tax missed the remainder");
+        assertEq(mint.totalAnnounced(), totalValue);
+    }
+
+    function test_announce_emitsTheTax() public {
+        uint256 id = _deposit();
+        (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) = _announcement();
+        vm.expectEmit(true, false, false, true, address(mint));
+        emit BlindMint.Taxed(id, rung);
+        vm.prank(forwarder);
+        mint.announce(id, idx, denoms, sigs);
+    }
+
+    function test_announce_rejectsADepositThatIsShortByOneRung() public {
+        // The old contract accepted this. The sum must now equal the deposit less the tax.
+        vm.prank(depositor);
+        uint256 id = mint.deposit{value: totalValue}(_points());
+        (uint256[] memory idx, uint256[] memory denoms, bytes[] memory sigs) = _announcement();
+        // Read the view before the prank. A prank covers the next call, and that call
+        // would be this one.
+        uint256 want = mint.mintable(totalValue);
+        vm.prank(forwarder);
+        vm.expectRevert(abi.encodeWithSelector(BlindMint.SumMismatch.selector, totalValue, want));
+        mint.announce(id, idx, denoms, sigs);
     }
 
     function test_gas_claim() public {

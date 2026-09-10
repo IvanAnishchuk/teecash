@@ -58,6 +58,43 @@ export function isDenom(d: bigint): boolean {
   return LADDER.includes(d);
 }
 
+/**
+ * The value that a deposit of `amount` mints.
+ *
+ * The contract keeps one rung and every base unit below the rung. That difference is the
+ * mint tax. The tax pays for the mint transaction and the claim transaction. The result
+ * is a multiple of the rung, so the ladder can express it.
+ *
+ * The result is zero for an amount below two rungs. That deposit mints nothing. The
+ * contract takes all of it. `BlindMint.mintable` must agree with this function.
+ */
+export function mintable(amount: bigint): bigint {
+  if (amount < MIN_DENOM) return 0n;
+  return (amount / MIN_DENOM - 1n) * MIN_DENOM;
+}
+
+/** The part of a deposit that the contract keeps. It is one rung plus the remainder. */
+export function tax(amount: bigint): bigint {
+  return amount <= 0n ? 0n : amount - mintable(amount);
+}
+
+/**
+ * The deposit that mints `net`.
+ *
+ * The tax is extra. It is not part of the amount that a user asks for. A user who wants
+ * three USDC of notes signs a transaction for 3.01.
+ *
+ * The tax must stay extra. A deposit of 3.00 mints 2.99. The greedy split of 2.99 holds
+ * nine notes of each rung below one USDC, which is twenty notes. The split of 3.00 holds
+ * three.
+ *
+ * A net amount below one rung is not a mistake. That deposit is all tax. It mints
+ * nothing. A net amount that is not a whole number of rungs mints the whole rungs only.
+ */
+export function grossFor(net: bigint): bigint {
+  return net + MIN_DENOM;
+}
+
 /** Extra blinded points in each deposit. Calldata is cheap. A short deposit is not cheap. */
 export const SLACK = 4;
 
@@ -66,9 +103,14 @@ export const SLACK = 4;
  *
  * The mint can only sign points that the deposit contains. This count is therefore the
  * ceiling on the split. The count is the smallest possible note count plus `SLACK`.
+ *
+ * `amount` is the value of the deposit and not the value that it mints. The tax is
+ * removed first. A deposit that mints nothing still carries `SLACK` points, because the
+ * contract refuses a deposit that carries none.
  */
 export function pointCount(amount: bigint): number {
-  return splitGreedy(amount).length + SLACK;
+  const net = mintable(amount);
+  return (net === 0n ? 0 : splitGreedy(net).length) + SLACK;
 }
 
 /**

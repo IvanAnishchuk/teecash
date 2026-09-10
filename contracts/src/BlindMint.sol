@@ -57,6 +57,14 @@ contract BlindMint is IReceiver {
     /// @notice A depositor can reclaim a pending deposit after this delay.
     uint64 public immutable refundDelay;
 
+    /// @notice The account that receives the mint tax.
+    /// @dev It pays for the mint transaction and the claim transaction. It holds no other
+    ///      role here. It cannot announce. It cannot refund. It cannot claim.
+    address public immutable treasury;
+
+    /// @notice The smallest denomination of the ladder. Every mint is a multiple of it.
+    uint256 public immutable rung;
+
     /// @notice The domain separation tag. It contains the chain ID and this address.
     bytes public dst;
 
@@ -72,10 +80,12 @@ contract BlindMint is IReceiver {
     event Announced(uint256 indexed id, uint256[] pointIndexes, uint256[] denoms, bytes[] blindSigs);
     event Claimed(address indexed wallet, uint256 denom);
     event Refunded(uint256 indexed id, address indexed depositor, uint256 amount);
+    event Taxed(uint256 indexed id, uint256 amount);
 
     error NotForwarder();
     error NoPoints();
     error NoValue();
+    error NoTreasury();
     error AmountTooLarge();
     error TooManyPoints(uint256 got, uint256 max);
     error BadDeposit(uint256 id);
@@ -97,20 +107,48 @@ contract BlindMint is IReceiver {
 
     /**
      * @param forwarder_ The address that the CRE workflow writes through.
+     * @param treasury_ The address that receives the mint tax.
      * @param refundDelay_ The wait before a depositor can reclaim a pending deposit.
      * @param denoms The denomination ladder.
      * @param pubkeys One G1 public key for each denomination, in the same order.
      */
-    constructor(address forwarder_, uint64 refundDelay_, uint256[] memory denoms, bytes[] memory pubkeys) {
+    constructor(
+        address forwarder_,
+        address treasury_,
+        uint64 refundDelay_,
+        uint256[] memory denoms,
+        bytes[] memory pubkeys
+    ) {
         if (denoms.length != pubkeys.length) revert LengthMismatch();
+        if (denoms.length == 0) revert LengthMismatch();
+        if (treasury_ == address(0)) revert NoTreasury();
         forwarder = forwarder_;
+        treasury = treasury_;
         refundDelay = refundDelay_;
+        uint256 smallest = type(uint256).max;
         for (uint256 i = 0; i < denoms.length; i++) {
             if (denoms[i] == 0) revert UnknownDenomination(0);
             if (pubkeys[i].length != BLS.G1_BYTES) revert BLS.BadLength(pubkeys[i].length, BLS.G1_BYTES);
             mintPubkeys[denoms[i]] = pubkeys[i];
+            if (denoms[i] < smallest) smallest = denoms[i];
         }
+        rung = smallest;
         dst = _buildDst();
+    }
+
+    /**
+     * @notice The value that a deposit of `amount` mints.
+     * @dev The rest is the mint tax. It is one rung plus every base unit below the rung.
+     *      The result is a multiple of the rung, so the ladder can express it.
+     *
+     *      The result is zero for a deposit below two rungs. That deposit mints nothing.
+     *      The treasury takes all of it.
+     *
+     *      `lib-blind` and the Go mint must agree with this function.
+     */
+    function mintable(uint256 amount) public view returns (uint256) {
+        if (amount < rung) return 0;
+        return (amount / rung - 1) * rung;
     }
 
     /**
@@ -145,8 +183,8 @@ contract BlindMint is IReceiver {
     /**
      * @notice Publish the blind signatures for one deposit.
      * @dev The denominations are public. This contract can therefore add them. Their sum
-     *      must equal the deposit. Blinding hides the address of a note. Blinding does not
-     *      hide the key that signed it.
+     *      must equal `mintable(amount)`. Blinding hides the address of a note. Blinding
+     *      does not hide the key that signed it.
      * @param id The deposit identifier.
      * @param pointIndexes The points that the mint signed, in the order of the deposit.
      * @param denoms The denomination for each signed point.
@@ -189,7 +227,6 @@ contract BlindMint is IReceiver {
         Deposit storage d = deposits[id];
         if (d.status != Status.Pending) revert BadDeposit(id);
         if (pointIndexes.length != denoms.length || denoms.length != blindSigs.length) revert LengthMismatch();
-        if (pointIndexes.length == 0) revert NoPoints();
 
         uint256 sum;
         uint256 seen;
@@ -203,11 +240,24 @@ contract BlindMint is IReceiver {
             if (blindSigs[i].length != BLS.G2_BYTES) revert BLS.BadLength(blindSigs[i].length, BLS.G2_BYTES);
             sum += denoms[i];
         }
-        if (sum != d.amount) revert SumMismatch(sum, d.amount);
+        // The deposit keeps one rung and the remainder below it. An empty note list is a
+        // legal announcement. It is legal only for a deposit that mints nothing, because
+        // the sum must still agree. No separate count check is necessary.
+        uint256 want = mintable(d.amount);
+        if (sum != want) revert SumMismatch(sum, want);
 
+        uint256 taken = d.amount - sum;
         d.status = Status.Announced;
         totalAnnounced += sum;
         emit Announced(id, pointIndexes, denoms, blindSigs);
+
+        // This is the last statement and it runs after every write. The forwarder
+        // delivers the report. A treasury that refused the value would revert that
+        // delivery.
+        if (taken != 0) {
+            emit Taxed(id, taken);
+            _send(treasury, taken);
+        }
     }
 
     /**
@@ -232,6 +282,7 @@ contract BlindMint is IReceiver {
     }
 
     /// @notice Return a pending deposit. The mint calls this when it refuses to sign.
+    /// @dev A refund returns the whole deposit. The mint signed nothing, so it takes no tax.
     function refundByMint(uint256 id) external onlyForwarder {
         _refund(id);
     }

@@ -58,6 +58,7 @@ type Note struct {
 type Mint struct {
 	keys   map[string]*Key
 	ladder []*big.Int // largest first
+	rung   *big.Int   // the smallest denomination
 }
 
 // New builds a mint from a set of keys.
@@ -75,7 +76,32 @@ func New(keys []*Key) (*Mint, error) {
 		m.ladder = append(m.ladder, k.Denom)
 	}
 	sort.Slice(m.ladder, func(i, j int) bool { return m.ladder[i].Cmp(m.ladder[j]) > 0 })
+	m.rung = m.ladder[len(m.ladder)-1]
 	return m, nil
+}
+
+// Rung returns the smallest denomination. Every mint is a multiple of it.
+func (m *Mint) Rung() *big.Int {
+	return new(big.Int).Set(m.rung)
+}
+
+// Mintable returns the value that a deposit of amount mints.
+//
+// The contract keeps one rung and every base unit below the rung. That difference is the
+// mint tax. The tax pays for the mint transaction and the claim transaction.
+//
+// The result is zero for a deposit below two rungs. That deposit mints nothing. The
+// contract takes all of it.
+//
+// `BlindMint.mintable` and `mintable` in lib-blind must agree with this function. A
+// disagreement makes every announcement revert.
+func (m *Mint) Mintable(amount *big.Int) *big.Int {
+	if amount == nil || amount.Cmp(m.rung) < 0 {
+		return new(big.Int)
+	}
+	out := new(big.Int).Div(amount, m.rung)
+	out.Sub(out, big.NewInt(1))
+	return out.Mul(out, m.rung)
 }
 
 // PublicKeys returns the ladder and the matching public keys, largest denomination first.
@@ -91,9 +117,14 @@ func (m *Mint) PublicKeys() ([]*big.Int, [][]byte) {
 
 // Split chooses the denominations for one deposit.
 //
-// The mint is free here. The contract checks the sum and the point count only. This
-// implementation takes the largest denomination that still fits. That choice gives the
-// fewest notes. A later version can pick a split that makes notes harder to distinguish.
+// The tax is removed first. The split therefore covers Mintable(amount) and not the whole
+// deposit. An empty split is the correct answer for a deposit that mints nothing. The
+// contract accepts an empty announcement for that deposit.
+//
+// The mint is free in its choice. The contract checks the sum and the point count only.
+// This implementation takes the largest denomination that still fits. That choice gives
+// the fewest notes. A later version can pick a split that makes notes harder to
+// distinguish.
 func (m *Mint) Split(amount *big.Int, maxPoints int) ([]*big.Int, error) {
 	if amount == nil || amount.Sign() <= 0 {
 		return nil, errors.New("mint: the amount must be more than zero")
@@ -101,7 +132,10 @@ func (m *Mint) Split(amount *big.Int, maxPoints int) ([]*big.Int, error) {
 	if maxPoints <= 0 {
 		return nil, errors.New("mint: the deposit holds no points")
 	}
-	rest := new(big.Int).Set(amount)
+	rest := m.Mintable(amount)
+	if rest.Sign() == 0 {
+		return nil, nil
+	}
 	var out []*big.Int
 	for _, d := range m.ladder {
 		for rest.Cmp(d) >= 0 {

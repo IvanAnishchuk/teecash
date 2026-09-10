@@ -1,6 +1,6 @@
 {
   "chainSelector": 3034092155422581607,
-  "blindMint": "0x0A36c0F06E960E9d073A4790653e06cF3E241B8f",
+  "blindMint": "0x60761633e1BF72dda9B9EEF5cA65BA9DC421EfC2",
   "ladder": [
     { "denom": "10000000000000000", "secretId": "MINT_KEY_1_CENT" },
     { "denom": "100000000000000000", "secretId": "MINT_KEY_10_CENT" },

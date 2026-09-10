@@ -14,10 +14,13 @@ import {
   type Domain,
   blind,
   blindSign,
+  grossFor,
   mintKey,
+  mintable,
   pointCount,
   randomScalar,
   splitGreedy,
+  tax,
   toHex,
   unblind,
   verify,
@@ -88,13 +91,17 @@ export async function deploy(): Promise<void> {
   // the role when the variable is absent. The `mint` command needs that default.
   const creForwarder = (process.env.TEECASH_CRE_FORWARDER ?? account.address) as Address;
 
+  // The mint tax funds the mint transaction and the claim transaction. Both come from the
+  // deployer, so the deployer is the treasury.
+  const treasury = (process.env.TEECASH_TREASURY ?? account.address) as Address;
+
   // The init code carries the constructor arguments, so the address covers the forwarder,
   // the ladder and every public key. The same inputs give the same address on every run
   // and on every chain. A different mint key set is a different deployment.
   const initCode = encodeDeployData({
     abi: blindMintAbi,
     bytecode: artifact("BlindMint").bytecode,
-    args: [creForwarder, 3600n, keys.map((k) => k.denom), keys.map((k) => toHex(k.pk))],
+    args: [creForwarder, treasury, 3600n, keys.map((k) => k.denom), keys.map((k) => toHex(k.pk))],
   });
   const blindMint = getContractAddress({
     opcode: "CREATE2",
@@ -123,6 +130,7 @@ export async function deploy(): Promise<void> {
   console.log(`chain      ${chainId}`);
   console.log(`BlindMint  ${blindMint}${existing === undefined ? "" : " (already deployed)"}`);
   console.log(`forwarder  ${creForwarder}`);
+  console.log(`treasury   ${treasury}`);
   console.log(`ladder     ${LADDER.map((d) => usdc(d)).join(", ")}`);
   console.log(`state      ${statePath}`);
 }
@@ -132,7 +140,12 @@ export async function deposit(amountUsdc: string): Promise<void> {
   const state = load();
   const domain = domainOf(state);
   // parseUnits keeps the full precision of 18 decimals. A float would lose it.
-  const amount = parseUnits(amountUsdc, 18);
+  const net = parseUnits(amountUsdc, 18);
+
+  // The tax is extra and not part of the notes. The transaction therefore carries one
+  // rung more than the caller asked for. The contract mints exactly what the caller
+  // asked for.
+  const amount = grossFor(net);
 
   // The mint may pick any split. The deposit therefore carries the smallest split plus
   // slack.
@@ -170,16 +183,23 @@ export async function deposit(amountUsdc: string): Promise<void> {
   });
   const id = (logs[0] as unknown as { args: { id: bigint } }).args.id;
 
+  // The record holds the value that the deposit mints. The tax leaves the contract when
+  // the mint announces. Every balance in `status` reads this field.
   state.deposits.push({
     id: id.toString(),
-    amount: amount.toString(),
+    amount: mintable(amount).toString(),
     block: receipt.blockNumber.toString(),
     notes,
   });
   save(state);
 
+  // `splitGreedy` refuses an amount of zero. A deposit below two rungs mints nothing.
+  const minted = mintable(amount);
+  const noteCount = minted > 0n ? splitGreedy(minted).length : 0;
+
   console.log(`deposit ${id} of ${usdc(amount)} against ${count} points`);
-  console.log(`the smallest split needs ${splitGreedy(amount).length} notes`);
+  console.log(`it mints ${usdc(minted)} and the mint tax is ${usdc(tax(amount))}`);
+  console.log(`the smallest split needs ${noteCount} notes`);
   console.log(`tx ${hash}`);
   console.log(`gas ${receipt.gasUsed}`);
 }
@@ -195,9 +215,12 @@ export async function mint(id?: string): Promise<void> {
   const state = load();
   const record = findDeposit(state, id);
   const keys = keysOf(state);
+
+  // The record already holds the mintable part. The tax is therefore removed once and
+  // not twice.
   const amount = BigInt(record.amount);
 
-  const split = splitGreedy(amount);
+  const split = amount > 0n ? splitGreedy(amount) : [];
   if (split.length > record.notes.length) throw new Error("mint: the deposit holds too few points");
 
   const pointIndexes: bigint[] = [];
