@@ -183,7 +183,15 @@ export async function settleDeposit(deposit: Deposit): Promise<void> {
   // counts a gift to the treasury as money on the way. The chain has to say `announced`
   // first, because until then the mint may still answer.
   if (stored.length === 0) {
-    if (chain.status === "announced") {
+    // `claimed` here means that nothing is left to do. The record mints nothing, so it
+    // names no money and no note.
+    //
+    // The deadline ends it either way. A mint that never answers this deposit leaves it
+    // pending on the chain for ever, and only the depositor can reclaim it. That depositor
+    // is the change wallet, which the melt emptied on purpose, so it cannot pay for the
+    // reclaim of its own dust. Nothing moves after the deadline, so the settler stops.
+    const dead = Number(chain.deadline) * 1000 <= Date.now();
+    if (chain.status === "announced" || dead) {
       await putDepositOnly({ ...deposit, status: "claimed" });
     }
     return;
