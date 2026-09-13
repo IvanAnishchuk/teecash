@@ -168,7 +168,19 @@ contracts/   Foundry. BlindMint.sol and BLS.sol. BlindMint receives the CRE repo
 workflow/    Go. The CRE project. mint/ and announce/ hold the logic and test on the
              host. blindmint/ holds the workflow itself.
 cli/         The client. deploy, deposit, mint, sync, claim, spend, sweep.
+app/         Next.js. The wallet frontend. Privy holds the note wallets.
+docs/        The specs. They are the design record and they predate the code.
 ```
+
+The specs:
+
+| File | Covers |
+|---|---|
+| [`docs/contract-spec.md`](docs/contract-spec.md) | `BlindMint`, the two ledgers, the tax, the claim and the BLS verification |
+| [`docs/mint-spec.md`](docs/mint-spec.md) | the CRE workflow, the enclave boundary, the split and the sweep |
+| [`docs/relayer-spec.md`](docs/relayer-spec.md) | the claim relayer and why the depositor must not claim |
+| [`docs/frontend-spec.md`](docs/frontend-spec.md) | the wallet application and where a note record lives |
+| [`docs/specs/2026-09-10-mint-tax-design.md`](docs/specs/2026-09-10-mint-tax-design.md) | the tax decision, written before the change |
 
 Three implementations of the same cryptography agree on one file. The TypeScript
 generates `lib-blind/vectors.json`. The Solidity tests and the Go tests both read it.
