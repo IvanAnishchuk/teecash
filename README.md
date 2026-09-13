@@ -14,6 +14,8 @@ deposit.
 On Arc the denomination is the gas token. A wallet that receives a note can spend it at
 once and needs no funding transaction.
 
+**[The architecture diagram is in `docs/architecture.md`.](docs/architecture.md)**
+
 A Confidential Workflow addresses the central weakness of the classic Chaumian design.
 The mint key never leaves the enclave, so an operator cannot sign off band and inflate
 the supply. See **Status** below for how far this is demonstrated.
@@ -176,6 +178,7 @@ The specs:
 
 | File | Covers |
 |---|---|
+| [`docs/architecture.md`](docs/architecture.md) | **the architecture diagram**, the trust boundary and the flow |
 | [`docs/contract-spec.md`](docs/contract-spec.md) | `BlindMint`, the two ledgers, the tax, the claim and the BLS verification |
 | [`docs/mint-spec.md`](docs/mint-spec.md) | the CRE workflow, the enclave boundary, the split and the sweep |
 | [`docs/relayer-spec.md`](docs/relayer-spec.md) | the claim relayer and why the depositor must not claim |
